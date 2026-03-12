@@ -1,0 +1,27 @@
+{
+  "name": "finwise-windows-widget",
+  "version": "1.0.0",
+  "description": "FinWise desktop widget for Windows",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.finwise.widget",
+    "productName": "FinWise Widget",
+    "win": {
+      "target": "nsis",
+      "icon": "../../client/public/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  }
+}
