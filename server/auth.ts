@@ -3,7 +3,7 @@
  * Token is stored in httpOnly cookie — no JS access, safe against XSS.
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { createHmac, randomBytes, timingSafeEqual, pbkdf2 } from "crypto";
 
 // ─── PASSWORD HASHING (pure Node crypto — no bcrypt dep needed) ───────────
 // Uses PBKDF2-HMAC-SHA256 with 310000 iterations (NIST recommended)
@@ -12,7 +12,7 @@ export async function hashPassword(plaintext: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const salt = randomBytes(16).toString("hex");
     // Node built-in pbkdf2
-    require("crypto").pbkdf2(plaintext, salt, 310000, 32, "sha256", (err: Error | null, derivedKey: Buffer) => {
+    pbkdf2(plaintext, salt, 310000, 32, "sha256", (err: Error | null, derivedKey: Buffer) => {
       if (err) return reject(err);
       resolve(`pbkdf2:${salt}:${derivedKey.toString("hex")}`);
     });
@@ -22,7 +22,7 @@ export async function hashPassword(plaintext: string): Promise<string> {
 export async function verifyPassword(plaintext: string, hashed: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const [, salt, keyHex] = hashed.split(":");
-    require("crypto").pbkdf2(plaintext, salt, 310000, 32, "sha256", (err: Error | null, derivedKey: Buffer) => {
+    pbkdf2(plaintext, salt, 310000, 32, "sha256", (err: Error | null, derivedKey: Buffer) => {
       if (err) return reject(err);
       try {
         const a = Buffer.from(derivedKey.toString("hex"));
