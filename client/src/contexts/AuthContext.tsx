@@ -10,6 +10,8 @@
  */
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useLocation } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
@@ -37,6 +39,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   // In VITE_DEMO_MODE the interceptor is already installed before mount,
   // so we can start with user=DEMO_USER and loading=false immediately.
+  const [, navigate] = useHashLocation();
   const [user, setUser] = useState<AuthUser | null>(DEMO_MODE ? DEMO_USER : null);
   const [loading, setLoading] = useState(!DEMO_MODE);
   const [isDemo, setIsDemo] = useState(DEMO_MODE);
@@ -66,18 +69,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { email, password });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Ошибка входа");
     setUser(data);
-    await queryClient.invalidateQueries(); // ← данные обновятся без перезагрузки
+    queryClient.clear(); // ← сначала clear, потом navigate
+    navigate("/");
   };
 
   const register = async (email: string, name: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/register", { email, name, password });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Ошибка регистрации");
     setUser(data);
-    await queryClient.invalidateQueries(); // ← то же самое
+    queryClient.clear();
+    navigate("/");
   };
+
 
   const logout = async () => {
     if (!DEMO_MODE) {

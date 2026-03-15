@@ -194,10 +194,8 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 // ── Credit Card Detail Card ────────────────────────────────────────────────
 
 function CreditCardDetail({ account }: { account: Account }) {
-  const balance = parseFloat(String(account.initialBalance));
+  const debt = parseFloat(String((account as any).debt ?? 0)); // ← с сервера
   const limit = account.creditLimit ? parseFloat(String(account.creditLimit)) : null;
-  // balance is negative when in debt
-  const debt = balance < 0 ? Math.abs(balance) : 0;
   const available = limit ? limit - debt : null;
   const usedPct = limit ? Math.min((debt / limit) * 100, 100) : 0;
 
@@ -266,7 +264,7 @@ function AccountCard({ account }: { account: Account }) {
     },
   });
 
-  const balance = parseFloat(String(account.initialBalance));
+  const balance = parseFloat(String((account as any).balance ?? account.initialBalance));
 
   return (
     <Card data-testid={`card-account-${account.id}`}>
@@ -345,11 +343,9 @@ function AccountsSummary({ accounts }: { accounts: Account[] }) {
   const active = accounts.filter(a => !a.isArchived);
   const totalBalance = active.reduce((s, a) => s + parseFloat(String(a.initialBalance)), 0);
   const totalDebt = active
-    .filter(a => a.type === "credit")
-    .reduce((s, a) => {
-      const b = parseFloat(String(a.initialBalance));
-      return s + (b < 0 ? Math.abs(b) : 0);
-    }, 0);
+  .filter(a => a.type === "credit")
+  .reduce((s, a) => s + parseFloat(String((a as any).debt ?? 0)), 0);
+
   const totalAssets = active
     .filter(a => parseFloat(String(a.initialBalance)) > 0)
     .reduce((s, a) => s + parseFloat(String(a.initialBalance)), 0);
