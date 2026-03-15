@@ -9,7 +9,7 @@
  *   3. PG mode (production) — real JWT auth.
  */
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
@@ -68,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Ошибка входа");
     setUser(data);
+    await queryClient.invalidateQueries(); // ← данные обновятся без перезагрузки
   };
 
   const register = async (email: string, name: string, password: string) => {
@@ -75,18 +76,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Ошибка регистрации");
     setUser(data);
+    await queryClient.invalidateQueries(); // ← то же самое
   };
 
-  // AuthContext.tsx
   const logout = async () => {
     if (!DEMO_MODE) {
       await apiRequest("POST", "/api/auth/logout", {});
     }
-    queryClient.clear();        // ← сбросить весь кэш React Query
+    queryClient.clear(); // ← теперь работает, импорт есть
     setUser(null);
     setIsDemo(false);
-    // опционально: window.location.href = "/"; для чистого рестарта
   };
+
 
 
   return (

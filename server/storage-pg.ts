@@ -286,11 +286,17 @@ export class PgStorage {
 
   /** For credit card: debt = sum of creditPurchase - sum of creditPayment */
   async getCreditDebt(accountId: number): Promise<number> {
-    const txs = await db.select().from(S.transactions).where(eq(S.transactions.accountId, accountId));
-    return txs
+    const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
+    if (!acc) return 0;
+    const txs = await db.select().from(S.transactions)
+      .where(eq(S.transactions.accountId, accountId));
+    const txDelta = txs
       .filter(t => t.type === "creditPurchase" || t.type === "creditPayment")
-      .reduce((sum, t) => sum + t.amount, 0); // creditPurchase = negative, creditPayment = positive
+      .reduce((sum, t) => sum + t.amount, 0);
+    // initialBalance = сколько уже потрачено на момент добавления карты
+    return acc.initialBalance + txDelta;
   }
+
 
   // ── TRANSACTIONS ──────────────────────────────────────────────────────────
 
