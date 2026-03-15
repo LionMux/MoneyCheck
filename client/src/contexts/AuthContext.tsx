@@ -77,13 +77,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data);
   };
 
+  // AuthContext.tsx
   const logout = async () => {
     if (!DEMO_MODE) {
       await apiRequest("POST", "/api/auth/logout", {});
     }
+    queryClient.clear();        // ← сбросить весь кэш React Query
     setUser(null);
-    if (DEMO_MODE) setUser(DEMO_USER); // in demo, "logout" just resets to demo user
+    setIsDemo(false);
+    // опционально: window.location.href = "/"; для чистого рестарта
   };
+
 
   return (
     <AuthContext.Provider value={{ user, loading, isDemo, login, register, logout }}>
