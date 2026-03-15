@@ -53,10 +53,12 @@ function AppRouter() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppRouter />
-        <Toaster />
-      </AuthProvider>
+      <Router hook={useHashLocation}>   {/* ← поднять сюда */}
+        <AuthProvider>
+          <AppRouter />
+          <Toaster />
+        </AuthProvider>
+      </Router>
     </QueryClientProvider>
   );
 }

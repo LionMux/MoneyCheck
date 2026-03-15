@@ -141,15 +141,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Enrich with balance
     const enriched = await Promise.all(
       accounts.map(async (acc) => ({
-      ...acc,
-      balance: acc.type === "credit"
-        ? 0                              // кредитка не является активом
-        : await pg.getAccountBalance(acc.id),
-      debt: acc.type === "credit"
-        ? await pg.getCreditDebt(acc.id) // теперь включает initialBalance
-        : undefined,
-    }))
-
+        ...acc,
+        balance: acc.type === "credit"
+          ? 0
+          : await pg.getAccountBalance(acc.id),
+        debt: acc.type === "credit"
+          ? await pg.getCreditDebt(acc.id)
+          : undefined,
+      }))
     );
     res.json(enriched);
   });
