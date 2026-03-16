@@ -98,10 +98,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  // Returns current user info if authenticated
-  app.get("/api/auth/me", authMiddleware, async (req: AuthRequest, res) => {
-    if (!pg) return res.json({ id: 1, email: "demo@finwise.app", name: "Demo User" });
-    const user = await pg.getUserById(req.userId!);
+  // Returns current user info if authenticated.
+  // When running without PG (MemStorage/demo mode), skip auth and return demo user.
+  // IMPORTANT: authMiddleware must NOT be applied when !pg, otherwise it returns
+  // 401 before we can check the pg condition, causing an infinite logout loop.
+  app.get("/api/auth/me", async (req: AuthRequest, res) => {
+    if (!pg) {
+      // No database — running in demo/MemStorage mode, return fake user with 503
+      // so the frontend knows to enable demo mode (skip auth screen)
+      return res.status(503).json({ error: "Database not configured. Running in demo mode." });
+    }
+    // PG mode — require valid JWT
+    const token = req.cookies?.["finwise_token"];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    const payload = (await import("./auth")).verifyJwt(token);
+    if (!payload) return res.status(401).json({ error: "Invalid or expired token" });
+    const user = await pg.getUserById(payload.sub);
     if (!user) return res.status(404).json({ error: "User not found" });
     const { hashedPassword: _, ...safeUser } = user;
     res.json(safeUser);

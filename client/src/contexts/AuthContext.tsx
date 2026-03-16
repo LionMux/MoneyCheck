@@ -4,8 +4,8 @@
  * Three-layer isolation guarantee:
  *   1. `switching` flag — while switching accounts the app renders a full-screen
  *      spinner, so no page component can fire stale queries.
- *   2. `queryClient.clear()` is called BEFORE setUser() so the new render
- *      cycle always starts with an empty cache.
+ *   2. `queryClient.clear()` + `cancelQueries()` is called BEFORE setUser()
+ *      so the new render cycle always starts with an empty cache.
  *   3. App.tsx passes `key={user?.id ?? 'guest'}` to Layout, which forces
  *      React to fully unmount/remount every page component on user change —
  *      guaranteed zero stale component state.
@@ -17,7 +17,7 @@
  */
 import {
   createContext, useContext, useState, useEffect,
-  useCallback, ReactNode
+  useCallback, useRef, ReactNode
 } from "react";
 import { apiRequest, queryClient, setUnauthorizedHandler } from "@/lib/queryClient";
 import { useHashLocation } from "wouter/use-hash-location";
@@ -50,12 +50,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser]       = useState<AuthUser | null>(DEMO_MODE ? DEMO_USER : null);
   const [loading, setLoading] = useState(!DEMO_MODE);
   const [isDemo, setIsDemo]   = useState(DEMO_MODE);
-  /**
-   * `switching` is true during the gap between "old session cleared" and
-   * "new session ready to render". While true, App.tsx renders a full-screen
-   * spinner instead of the page tree — no stale query can fire.
-   */
   const [switching, setSwitching] = useState(false);
+
+  // Prevent re-entrant logout calls (e.g. multiple 401s arriving simultaneously)
+  const logoutInProgress = useRef(false);
 
   // ── Initial session check ─────────────────────────────────────────────────
   useEffect(() => {
@@ -66,28 +64,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (res.ok) {
           setUser(await res.json());
         } else if (res.status === 503) {
+          // Backend running without DB (MemStorage mode)
           setIsDemo(true);
         }
-        // 401 = not logged in — show auth screen
+        // 401 = not authenticated — show login screen (don't treat as error)
       })
       .catch(() => setIsDemo(true))
       .finally(() => setLoading(false));
   }, []);
 
   // ── Core switch helper ────────────────────────────────────────────────────
-  /**
-   * Immediately:
-   *   1. Sets switching=true → spinner renders, pages unmount
-   *   2. Cancels all in-flight requests
-   *   3. Clears the entire query cache
-   *   4. Navigates to "/"
-   * Returns an `endSwitch` function to call once the new user is set.
-   */
   const beginSwitch = useCallback(() => {
     setSwitching(true);
-    queryClient.cancelQueries();
-    queryClient.clear();
-    navigate("/");
+    queryClient.cancelQueries();   // abort all in-flight requests immediately
+    queryClient.clear();           // destroy ALL cached data
+    navigate("/");                 // reset URL to dashboard
     return function endSwitch() {
       setSwitching(false);
     };
@@ -101,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const endSwitch = beginSwitch();
     setUser(data);
-    // Give React one tick to flush the spinner before pages re-mount
+    // One animation frame: let React flush the spinner before pages re-mount
     await new Promise(r => setTimeout(r, 50));
     endSwitch();
   }, [beginSwitch]);
@@ -120,33 +111,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ── logout ────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
-    // Step 1: block rendering + clear cache + navigate("/")
-    const endSwitch = beginSwitch();
+    if (logoutInProgress.current) return; // prevent double-logout
+    logoutInProgress.current = true;
 
-    // Step 2: invalidate server session
+    const endSwitch = beginSwitch(); // block rendering + clear cache + navigate("/")
     if (!DEMO_MODE) {
       try {
         await apiRequest("POST", "/api/auth/logout", {});
       } catch {
-        // ignore network errors on logout — local state still gets cleared
+        // network error on logout is fine — local state still gets cleared
       }
     }
-
-    // Step 3: clear identity
     setUser(null);
     setIsDemo(false);
-
-    // Step 4: let the spinner frame paint
     await new Promise(r => setTimeout(r, 50));
-
-    // Step 5: unblock — AuthPage renders with zero stale data
     endSwitch();
+    logoutInProgress.current = false;
   }, [beginSwitch]);
 
-  // ── 401 auto-logout (expired/invalid token while app is open) ─────────────
+  // ── 401 handler — called by queryClient when server returns 401 ───────────
+  // This handles the case where a token expires while the app is open
   useEffect(() => {
     const handler = () => {
-      // Only react if we think we're logged in
       if (user || isDemo) logout();
     };
     setUnauthorizedHandler(handler);
