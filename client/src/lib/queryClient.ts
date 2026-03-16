@@ -18,32 +18,55 @@ export async function apiRequest(
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
+    credentials: "include",
   });
-
-  await throwIfResNotOk(res);
-  return res;
+  return res; // let the caller decide what to do with non-ok responses
 }
 
-type UnauthorizedBehavior = "returnNull" | "throw";
+type UnauthorizedBehavior = "returnNull" | "throw" | "logout";
+
+/**
+ * Default query function.
+ * on401="logout" — when the server returns 401, call the global
+ * unauthorizedHandler (set by AuthProvider) to force logout immediately.
+ * This prevents a stale/expired token from rendering another user's data.
+ */
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`);
+    const res = await fetch(`${API_BASE}${queryKey[0]}`, {
+      credentials: "include",
+    });
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+    if (res.status === 401) {
+      if (unauthorizedBehavior === "returnNull") return null;
+      if (unauthorizedBehavior === "logout") {
+        // Notify AuthContext to log the user out
+        unauthorizedHandler?.();
+        return null;
+      }
+      await throwIfResNotOk(res); // "throw"
     }
 
     await throwIfResNotOk(res);
     return await res.json();
   };
 
+/**
+ * Global unauthorized handler — set by AuthProvider on mount.
+ * Allows queryClient to trigger logout without a direct import cycle.
+ */
+let unauthorizedHandler: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void) {
+  unauthorizedHandler = fn;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: getQueryFn({ on401: "throw" }),
+      queryFn: getQueryFn({ on401: "logout" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
