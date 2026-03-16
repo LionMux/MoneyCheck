@@ -33,27 +33,31 @@ function AppRouter() {
   }
 
   return (
-    <Router hook={useHashLocation}>
-      <Layout>
-        <Switch>
-          <Route path="/" component={Dashboard} />
-          <Route path="/transactions" component={Transactions} />
-          <Route path="/accounts" component={AccountsPage} />
-          <Route path="/budget" component={Budget} />
-          <Route path="/goals" component={Goals} />
-          <Route path="/learn" component={Learn} />
-          <Route path="/notifications" component={NotificationsPage} />
-          <Route component={NotFound} />
-        </Switch>
-      </Layout>
-    </Router>
+    <Layout>
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route path="/transactions" component={Transactions} />
+        <Route path="/accounts" component={AccountsPage} />
+        <Route path="/budget" component={Budget} />
+        <Route path="/goals" component={Goals} />
+        <Route path="/learn" component={Learn} />
+        <Route path="/notifications" component={NotificationsPage} />
+        <Route component={NotFound} />
+      </Switch>
+    </Layout>
   );
 }
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Router hook={useHashLocation}>   {/* ← поднять сюда */}
+      {/*
+        Один единственный Router на всё приложение.
+        AuthProvider и AppRouter живут внутри него —
+        useHashLocation() в AuthContext корректно навигирует
+        и navigate("/") при logout сразу сбрасывает URL.
+      */}
+      <Router hook={useHashLocation}>
         <AuthProvider>
           <AppRouter />
           <Toaster />

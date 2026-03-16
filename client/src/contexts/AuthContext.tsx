@@ -10,7 +10,6 @@
  */
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
@@ -69,30 +68,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { email, password });
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Ошибка входа");
+    queryClient.clear(); // сбросить кэш предыдущего пользователя
     setUser(data);
-    queryClient.clear(); // ← сначала clear, потом navigate
-    navigate("/");
+    navigate("/"); // всегда на дашборд после входа
   };
 
   const register = async (email: string, name: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/register", { email, name, password });
     const data = await res.json();
-    setUser(data);
+    if (!res.ok) throw new Error(data.error || "Ошибка регистрации");
     queryClient.clear();
-    navigate("/");
+    setUser(data);
+    navigate("/"); // всегда на дашборд после регистрации
   };
-
 
   const logout = async () => {
     if (!DEMO_MODE) {
       await apiRequest("POST", "/api/auth/logout", {});
     }
-    queryClient.clear(); // ← теперь работает, импорт есть
+    queryClient.clear();  // очистить весь кэш текущего пользователя
     setUser(null);
     setIsDemo(false);
+    navigate("/");        // сбросить URL на root — следующий пользователь стартует с дашборда
   };
-
-
 
   return (
     <AuthContext.Provider value={{ user, loading, isDemo, login, register, logout }}>
