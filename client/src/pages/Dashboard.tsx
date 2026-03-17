@@ -27,6 +27,24 @@ function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
 }
 
+/**
+ * Умная подпись оси Y:
+ *   0        → ""          (нулевые тики не шумят)
+ *   1–999    → "500"       (реальное значение, без суффикса)
+ *   1 000–999 999 → "1,5k"  (с одним десятичным)
+ *   ≥ 1 000 000  → "1,2M"
+ */
+function fmtY(v: number): string {
+  if (v === 0) return "";
+  if (v < 1_000)    return String(Math.round(v));
+  if (v < 1_000_000) {
+    const k = v / 1_000;
+    return k % 1 === 0 ? `${k}к` : `${k.toFixed(1)}к`;
+  }
+  const m = v / 1_000_000;
+  return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+}
+
 const CATEGORY_COLORS: Record<string, string> = {
   "Еда": "#20808D",
   "Транспорт": "#A84B2F",
@@ -52,7 +70,6 @@ export default function Dashboard() {
   const { data: progress }          = useQuery<UserProgress>({ queryKey: ["/api/progress"] });
   const { data: accounts = [] }     = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
 
-  // [2.2] Месячная статистика + [6.5] isError для error-state в модалке
   const {
     data: monthlySummary = [],
     isLoading: summaryLoading,
@@ -62,7 +79,6 @@ export default function Dashboard() {
     staleTime: 60_000,
   });
 
-  // [6.5] Retry: инвалидируем кэш и перезапрашиваем
   function handleSummaryRetry() {
     queryClient.invalidateQueries({ queryKey: ["/api/transactions/monthly-summary"] });
   }
@@ -83,7 +99,8 @@ export default function Dashboard() {
     const dateStr = format(d, "yyyy-MM-dd");
     const dayTxs = transactions.filter(t => t.date === dateStr);
     return {
-      day:     format(d, "EEE", { locale: ru }),
+      // Исправлено: "EEEEEE" → двухбуквенные "пн", "вт", "ср", "чт", "пт", "сб", "вс"
+      day:     format(d, "EEEEEE", { locale: ru }),
       income:  dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
       expense: dayTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0),
     };
@@ -191,7 +208,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={180}>
-                <AreaChart data={last7} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <AreaChart data={last7} margin={{ top: 4, right: 4, left: 8, bottom: 0 }}>
                   <defs>
                     <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#20808D" stopOpacity={0.3} />
@@ -203,10 +220,31 @@ export default function Dashboard() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={v => v > 0 ? `${(v / 1000).toFixed(0)}k` : ""} />
+
+                  {/* Исправлено: EEEEEE → "пн", "вт", "ср"... */}
+                  <XAxis
+                    dataKey="day"
+                    tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+
+                  {/* Исправлено: умная fmtY: 500 → "500", 1500 → "1,5к", 1 500 000 → "1,5M" */}
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={fmtY}
+                    width={42}
+                  />
+
                   <RechartsTooltip
-                    contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: 12 }}
+                    contentStyle={{
+                      background: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "8px",
+                      fontSize: 12,
+                    }}
                     formatter={(v: number) => [fmt(v)]}
                   />
                   <Area type="monotone" dataKey="income" stroke="#20808D" strokeWidth={2} fill="url(#incomeGrad)" name="Доход" />
@@ -314,7 +352,6 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* [4.1 + 6.5] Модальное окно с heatmap + error state */}
         <MonthlyIncomeModal
           isOpen={modalOpen}
           onClose={() => setModalOpen(false)}
