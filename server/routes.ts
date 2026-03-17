@@ -104,8 +104,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // 401 before we can check the pg condition, causing an infinite logout loop.
   app.get("/api/auth/me", async (req: AuthRequest, res) => {
     if (!pg) {
-      // No database — running in demo/MemStorage mode, return fake user with 503
-      // so the frontend knows to enable demo mode (skip auth screen)
       return res.status(503).json({ error: "Database not configured. Running in demo mode." });
     }
     // PG mode — require valid JWT
@@ -150,7 +148,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.get("/api/accounts", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
     const accounts = await pg.getAccounts(getUserId(req));
-    // Enrich with balance
     const enriched = await Promise.all(
       accounts.map(async (acc) => ({
         ...acc,
@@ -187,7 +184,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ────────────────────────────────────────────────────────────────────────
-  // TRANSACTIONS (updated to support userId and accountId)
+  // TRANSACTIONS
   // ────────────────────────────────────────────────────────────────────────
 
   app.get("/api/transactions", guard, async (req: AuthRequest, res) => {
@@ -197,6 +194,41 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
     const txs = await (mem as any).getTransactions();
     res.json(txs);
+  });
+
+  // ── ВАЖНО: этот роут должен быть выше /account/:accountId,
+  //    иначе Express примет "monthly-summary" за accountId ──────────────
+  app.get("/api/transactions/monthly-summary", guard, async (req: AuthRequest, res) => {
+    // В mem-режиме (без БД) возвращаем пустой массив — безопасно
+    if (!pg) return res.json([]);
+
+    const userId = getUserId(req);
+    const txs = await pg.getTransactions(userId);
+
+    // Группируем транзакции по месяцу ("YYYY-MM")
+    const map: Record<string, { income: number; expense: number }> = {};
+
+    for (const t of txs) {
+      // t.date — строка "YYYY-MM-DD"
+      const month = String(t.date).slice(0, 7); // "2026-03"
+      if (!map[month]) map[month] = { income: 0, expense: 0 };
+      if (t.type === "income") {
+        map[month].income += Number(t.amount);
+      } else if (t.type === "expense") {
+        map[month].expense += Math.abs(Number(t.amount));
+      }
+    }
+
+    // Формируем отсортированный массив (от старых к новым)
+    const result = Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, data]) => ({
+        month,                    // "2026-03"
+        income: data.income,
+        expense: data.expense,
+      }));
+
+    res.json(result);
   });
 
   app.get("/api/transactions/account/:accountId", guard, async (req: AuthRequest, res) => {
@@ -348,8 +380,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ────────────────────────────────────────────────────────────────────────
-  // QUICK-ADD (public deep-link endpoint for widgets)
-  // GET /api/quick-add?type=expense — returns 200 so SPA can handle the rest
+  // QUICK-ADD
   // ────────────────────────────────────────────────────────────────────────
 
   app.get("/api/quick-add", (req, res) => {
