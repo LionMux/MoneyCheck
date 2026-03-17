@@ -6,23 +6,26 @@
   :root {
     /* Finance theme: deep navy + emerald green accent */
     --background: 220 20% 97%;
-    --foreground: 220 25% 12%;
+
+    /* Светлая тема: основной текст стал чуть темнее (12% → 8%) */
+    --foreground: 220 25% 8%;
     --card: 0 0% 100%;
-    --card-foreground: 220 25% 12%;
+    --card-foreground: 220 25% 8%;
     --popover: 0 0% 100%;
-    --popover-foreground: 220 25% 12%;
+    --popover-foreground: 220 25% 8%;
     --primary: 158 64% 32%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 14% 94%;
-    --secondary-foreground: 220 25% 20%;
+    --secondary-foreground: 220 25% 18%;
     --muted: 220 14% 94%;
-    --muted-foreground: 220 10% 50%;
+    /* Светлая тема: второстепенный текст стал заметным (50% → 38%) */
+    --muted-foreground: 220 12% 38%;
     --accent: 220 14% 94%;
-    --accent-foreground: 220 25% 20%;
+    --accent-foreground: 220 25% 18%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 13% 88%;
-    --input: 220 13% 88%;
+    --border: 220 13% 85%;
+    --input: 220 13% 85%;
     --ring: 158 64% 32%;
     --radius: 0.625rem;
     --sidebar-background: 220 25% 12%;
@@ -37,9 +40,13 @@
     /* Custom tokens */
     --color-income: 158 64% 32%;
     --color-expense: 0 72% 51%;
-    --color-neutral: 220 10% 50%;
+    --color-neutral: 220 10% 38%;
     --font-body: 'Satoshi', 'Inter', sans-serif;
     --font-display: 'Cabinet Grotesk', 'Satoshi', sans-serif;
+
+    /* Recharts tooltip — светлая тема */
+    --chart-tooltip-bg: 0 0% 100%;
+    --chart-tooltip-text: 220 25% 8%;
   }
 
   .dark {
@@ -70,6 +77,10 @@
     --sidebar-accent-foreground: 220 10% 85%;
     --sidebar-border: 220 25% 12%;
     --sidebar-ring: 158 55% 45%;
+
+    /* Recharts tooltip — тёмная тема: явный светлый текст */
+    --chart-tooltip-bg: 220 22% 11%;
+    --chart-tooltip-text: 220 10% 90%;
   }
 }
 
@@ -91,9 +102,9 @@
 .tabular-nums { font-variant-numeric: tabular-nums lining-nums; }
 
 /* Income / expense color helpers */
-.text-income { color: hsl(158 64% 32%); }
+.text-income { color: hsl(158 64% 28%); }
 .dark .text-income { color: hsl(158 55% 52%); }
-.text-expense { color: hsl(0 72% 51%); }
+.text-expense { color: hsl(0 72% 46%); }
 .dark .text-expense { color: hsl(0 65% 65%); }
 
 /* Smooth scrollbar */
