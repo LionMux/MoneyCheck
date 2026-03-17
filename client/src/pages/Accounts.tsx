@@ -129,7 +129,8 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label>Баланс (₽)</Label>
+          {/* Для кредитной карты поле означает текущий остаток на карте (не долг) */}
+          <Label>{type === "credit" ? "Остаток на карте (₽)" : "Баланс (₽)"}</Label>
           <Input
             type="number"
             step="0.01"
@@ -194,9 +195,11 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 // ── Credit Card Detail Card ────────────────────────────────────────────────
 
 function CreditCardDetail({ account }: { account: Account }) {
-  const debt = parseFloat(String((account as any).debt ?? 0)); // ← с сервера
   const limit = account.creditLimit ? parseFloat(String(account.creditLimit)) : null;
-  const available = limit ? limit - debt : null;
+  // initialBalance хранит остаток на карте; долг = лимит − остаток
+  const remaining = parseFloat(String(account.initialBalance ?? 0));
+  const debt = limit !== null ? Math.max(limit - remaining, 0) : 0;
+  const available = limit !== null ? remaining : null;
   const usedPct = limit ? Math.min((debt / limit) * 100, 100) : 0;
 
   return (
@@ -341,20 +344,25 @@ function AccountCard({ account }: { account: Account }) {
 
 function AccountsSummary({ accounts }: { accounts: Account[] }) {
   const active = accounts.filter(a => !a.isArchived);
-  const totalBalance = active.reduce((s, a) => s + parseFloat(String(a.initialBalance)), 0);
-  const totalDebt = active
-  .filter(a => a.type === "credit")
-  .reduce((s, a) => s + parseFloat(String((a as any).debt ?? 0)), 0);
 
-  const totalAssets = active
-    .filter(a => parseFloat(String(a.initialBalance)) > 0)
-    .reduce((s, a) => s + parseFloat(String(a.initialBalance)), 0);
+  // Общий баланс — только дебетовые карты и наличные (реальные деньги)
+  const totalBalance = active
+    .filter(a => a.type === "debit" || a.type === "cash" || a.type === "other")
+    .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
+
+  // Кредитный долг — сумма долгов по кредитным картам (лимит − остаток)
+  const totalDebt = active
+    .filter(a => a.type === "credit")
+    .reduce((s, a) => {
+      const limit = a.creditLimit ? parseFloat(String(a.creditLimit)) : 0;
+      const remaining = parseFloat(String(a.initialBalance ?? 0));
+      return s + Math.max(limit - remaining, 0);
+    }, 0);
 
   return (
-    <div className="grid grid-cols-3 gap-4 mb-6">
+    <div className="grid grid-cols-2 gap-4 mb-6">
       {[
         { label: "Общий баланс", value: totalBalance, color: totalBalance >= 0 ? "text-emerald-500" : "text-red-500" },
-        { label: "Активы", value: totalAssets, color: "text-blue-500" },
         { label: "Кредитный долг", value: totalDebt, color: totalDebt > 0 ? "text-red-500" : "text-emerald-500" },
       ].map(item => (
         <Card key={item.label} data-testid={`summary-${item.label}`}>
