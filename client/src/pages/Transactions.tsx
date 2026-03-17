@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Transaction, InsertTransaction } from "@shared/schema";
+import type { Transaction, InsertTransaction, Account } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,13 +9,20 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Plus, TrendingUp, TrendingDown } from "lucide-react";
+import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, Wallet, Banknote } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 
 const CATEGORIES = ["Еда", "Транспорт", "Развлечения", "Подписки", "Спорт", "ЖКХ", "Образование", "Доход", "Другое"];
+
+const ACCOUNT_TYPE_ICONS: Record<string, React.ReactNode> = {
+  debit: <CreditCard size={14} />,
+  credit: <CreditCard size={14} className="text-orange-500" />,
+  cash: <Banknote size={14} />,
+  other: <Wallet size={14} />,
+};
 
 function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(Math.abs(n));
@@ -26,21 +33,33 @@ function formatDate(d: string) {
   catch { return d; }
 }
 
+/** Для кредитной карты expense → creditPurchase, income → creditPayment */
+function resolveType(formType: "income" | "expense", account?: Account): string {
+  if (!account || account.type !== "credit") return formType;
+  return formType === "expense" ? "creditPurchase" : "creditPayment";
+}
+
 export default function Transactions() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "income" | "expense">("all");
-  const [form, setForm] = useState<Partial<InsertTransaction>>({
+  const [form, setForm] = useState<Partial<InsertTransaction> & { accountId?: number }>({
     type: "expense",
     date: format(new Date(), "yyyy-MM-dd"),
   });
 
   const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
+  const { data: accounts = [] } = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
+
+  const activeAccounts = accounts.filter((a) => !a.isArchived);
+  const selectedAccount = activeAccounts.find((a) => a.id === form.accountId);
+  const isCreditSelected = selectedAccount?.type === "credit";
 
   const addMut = useMutation({
     mutationFn: (data: InsertTransaction) => apiRequest("POST", "/api/transactions", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
       setOpen(false);
       setForm({ type: "expense", date: format(new Date(), "yyyy-MM-dd") });
       toast({ title: "Операция добавлена" });
@@ -49,18 +68,45 @@ export default function Transactions() {
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/transactions"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+    },
   });
 
-  const filtered = transactions.filter(t => filter === "all" || t.type === filter);
+  const filtered = transactions.filter(t => {
+    if (filter === "all") return true;
+    if (filter === "income") return t.type === "income" || t.type === "creditPayment";
+    return t.type === "expense" || t.type === "creditPurchase";
+  });
 
   const handleSubmit = () => {
     if (!form.title || !form.amount || !form.category || !form.type || !form.date) {
       toast({ title: "Заполните все поля", variant: "destructive" });
       return;
     }
-    const amount = form.type === "expense" ? -Math.abs(Number(form.amount)) : Math.abs(Number(form.amount));
-    addMut.mutate({ ...form, amount } as InsertTransaction);
+    const resolvedType = resolveType(form.type as "income" | "expense", selectedAccount);
+    // Для creditPurchase — сумма положительная (долг растёт);
+    // для creditPayment — отрицательная (долг уменьшается)
+    let amount: number;
+    if (resolvedType === "creditPurchase") {
+      amount = Math.abs(Number(form.amount));
+    } else if (resolvedType === "creditPayment") {
+      amount = -Math.abs(Number(form.amount));
+    } else if (form.type === "expense") {
+      amount = -Math.abs(Number(form.amount));
+    } else {
+      amount = Math.abs(Number(form.amount));
+    }
+
+    const payload: any = {
+      ...form,
+      amount,
+      type: resolvedType,
+    };
+    if (!form.accountId) delete payload.accountId;
+
+    addMut.mutate(payload as InsertTransaction);
   };
 
   return (
@@ -102,7 +148,9 @@ export default function Transactions() {
             <div>
               <p className="text-xs text-muted-foreground">Итого доходов</p>
               <p className="text-base font-bold tabular-nums text-income">
-                {fmt(transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0))}
+                {fmt(transactions
+                  .filter(t => t.type === "income" || t.type === "creditPayment")
+                  .reduce((s, t) => s + Math.abs(t.amount), 0))}
               </p>
             </div>
           </CardContent>
@@ -113,7 +161,9 @@ export default function Transactions() {
             <div>
               <p className="text-xs text-muted-foreground">Итого расходов</p>
               <p className="text-base font-bold tabular-nums text-expense">
-                {fmt(transactions.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0))}
+                {fmt(transactions
+                  .filter(t => t.type === "expense" || t.type === "creditPurchase")
+                  .reduce((s, t) => s + Math.abs(t.amount), 0))}
               </p>
             </div>
           </CardContent>
@@ -127,38 +177,47 @@ export default function Transactions() {
             <p className="text-center text-muted-foreground py-12 text-sm">Нет операций</p>
           ) : (
             <div className="divide-y divide-border">
-              {filtered.map(tx => (
-                <div key={tx.id} data-testid={`transaction-item-${tx.id}`}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors group"
-                >
-                  <div className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
-                    tx.type === "income" ? "bg-emerald-100 dark:bg-emerald-900/30" : "bg-red-100 dark:bg-red-900/30"
-                  )}>
-                    {tx.type === "income"
-                      ? <TrendingUp size={14} className="text-income" />
-                      : <TrendingDown size={14} className="text-expense" />
-                    }
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{tx.title}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
-                      <span className="text-xs text-muted-foreground">{formatDate(tx.date)}</span>
-                    </div>
-                  </div>
-                  <span className={cn("text-sm font-semibold tabular-nums flex-shrink-0", tx.type === "income" ? "text-income" : "text-expense")}>
-                    {tx.type === "income" ? "+" : "−"}{fmt(tx.amount)}
-                  </span>
-                  <button
-                    onClick={() => deleteMut.mutate(tx.id)}
-                    data-testid={`btn-delete-transaction-${tx.id}`}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-1 ml-1"
+              {filtered.map(tx => {
+                const isIncome = tx.type === "income" || tx.type === "creditPayment";
+                return (
+                  <div key={tx.id} data-testid={`transaction-item-${tx.id}`}
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors group"
                   >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
+                    <div className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+                      isIncome ? "bg-emerald-100 dark:bg-emerald-900/30" : "bg-red-100 dark:bg-red-900/30"
+                    )}>
+                      {isIncome
+                        ? <TrendingUp size={14} className="text-income" />
+                        : <TrendingDown size={14} className="text-expense" />
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{tx.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
+                        <span className="text-xs text-muted-foreground">{formatDate(tx.date)}</span>
+                        {tx.type === "creditPurchase" && (
+                          <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-orange-500 border-orange-300">Кредит</Badge>
+                        )}
+                        {tx.type === "creditPayment" && (
+                          <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-emerald-500 border-emerald-300">Погашение</Badge>
+                        )}
+                      </div>
+                    </div>
+                    <span className={cn("text-sm font-semibold tabular-nums flex-shrink-0", isIncome ? "text-income" : "text-expense")}>
+                      {isIncome ? "+" : "−"}{fmt(tx.amount)}
+                    </span>
+                    <button
+                      onClick={() => deleteMut.mutate(tx.id)}
+                      data-testid={`btn-delete-transaction-${tx.id}`}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-1 ml-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -171,6 +230,7 @@ export default function Transactions() {
             <DialogTitle>Новая операция</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            {/* Тип операции */}
             <div className="grid grid-cols-2 gap-2">
               {(["expense", "income"] as const).map(t => (
                 <button
@@ -180,7 +240,9 @@ export default function Transactions() {
                   className={cn(
                     "py-2 rounded-lg text-sm font-medium border transition-all",
                     form.type === t
-                      ? t === "income" ? "bg-emerald-50 border-emerald-400 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-red-50 border-red-400 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                      ? t === "income"
+                        ? "bg-emerald-50 border-emerald-400 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                        : "bg-red-50 border-red-400 text-red-700 dark:bg-red-900/20 dark:text-red-400"
                       : "border-border text-muted-foreground hover:border-primary"
                   )}
                 >
@@ -188,14 +250,77 @@ export default function Transactions() {
                 </button>
               ))}
             </div>
+
+            {/* Счёт */}
+            {activeAccounts.length > 0 && (
+              <div>
+                <Label>Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                <Select
+                  value={form.accountId ? String(form.accountId) : "none"}
+                  onValueChange={v => setForm(f => ({ ...f, accountId: v === "none" ? undefined : Number(v) }))}
+                >
+                  <SelectTrigger className="mt-1" data-testid="select-account">
+                    <SelectValue placeholder="Без счёта" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без счёта</SelectItem>
+                    {activeAccounts.map(acc => (
+                      <SelectItem key={acc.id} value={String(acc.id)}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: acc.color ?? "#10b981" }}
+                          />
+                          <span>{acc.name}</span>
+                          <span className="text-xs text-muted-foreground ml-1">
+                            {acc.type === "credit" ? "(кредит)" : acc.type === "cash" ? "(наличные)" : ""}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Подсказка для кредитной карты */}
+                {isCreditSelected && (
+                  <p className="text-xs text-orange-500 mt-1.5 flex items-center gap-1">
+                    <CreditCard size={11} />
+                    {form.type === "expense"
+                      ? "Покупка в кредит — долг возрастёт"
+                      : "Погашение кредита — долг уменьшится"}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Название */}
             <div>
               <Label htmlFor="tx-title">Название</Label>
-              <Input id="tx-title" data-testid="input-tx-title" placeholder="Например, продукты" value={form.title ?? ""} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="mt-1" />
+              <Input
+                id="tx-title"
+                data-testid="input-tx-title"
+                placeholder="Например, продукты"
+                value={form.title ?? ""}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                className="mt-1"
+              />
             </div>
+
+            {/* Сумма */}
             <div>
               <Label htmlFor="tx-amount">Сумма (₽)</Label>
-              <Input id="tx-amount" data-testid="input-tx-amount" type="number" placeholder="0" value={form.amount ?? ""} onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))} className="mt-1" />
+              <Input
+                id="tx-amount"
+                data-testid="input-tx-amount"
+                type="number"
+                placeholder="0"
+                value={form.amount ?? ""}
+                onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
+                className="mt-1"
+              />
             </div>
+
+            {/* Категория */}
             <div>
               <Label>Категория</Label>
               <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
@@ -207,11 +332,21 @@ export default function Transactions() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Дата */}
             <div>
               <Label htmlFor="tx-date">Дата</Label>
-              <Input id="tx-date" data-testid="input-tx-date" type="date" value={form.date ?? ""} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="mt-1" />
+              <Input
+                id="tx-date"
+                data-testid="input-tx-date"
+                type="date"
+                value={form.date ?? ""}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                className="mt-1"
+              />
             </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
             <Button onClick={handleSubmit} data-testid="btn-submit-transaction" disabled={addMut.isPending}>
