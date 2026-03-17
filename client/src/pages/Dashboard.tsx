@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction, Budget, SavingsGoal, UserProgress, Account } from "@shared/schema";
 import { TrendingUp, TrendingDown, Wallet, BookOpen, ArrowRight, CalendarDays } from "lucide-react";
 import { Link } from "wouter";
@@ -39,53 +39,56 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  // [1.1] Текущий выбранный месяц
   const [currentDisplayMonth, setCurrentDisplayMonth] = useState<string>(
     format(new Date(), "yyyy-MM")
   );
-  // [3.3] Состояние модального окна
   const [modalOpen, setModalOpen] = useState(false);
 
+  const queryClient = useQueryClient();
+
   const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
-  const { data: budgets = [] } = useQuery<Budget[]>({ queryKey: ["/api/budgets"] });
-  const { data: goals = [] } = useQuery<SavingsGoal[]>({ queryKey: ["/api/goals"] });
-  const { data: progress } = useQuery<UserProgress>({ queryKey: ["/api/progress"] });
-  const { data: accounts = [] } = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
+  const { data: budgets = [] }      = useQuery<Budget[]>({ queryKey: ["/api/budgets"] });
+  const { data: goals = [] }        = useQuery<SavingsGoal[]>({ queryKey: ["/api/goals"] });
+  const { data: progress }          = useQuery<UserProgress>({ queryKey: ["/api/progress"] });
+  const { data: accounts = [] }     = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
 
-  // [2.2] Получаем месячную статистику из нового API-эндпоинта
-  const { data: monthlySummary = [], isLoading: summaryLoading } =
-    useQuery<MonthlySummaryItem[]>({
-      queryKey: ["/api/transactions/monthly-summary"],
-      staleTime: 60_000, // кэш 1 минута — не перезапрашиваем при каждом рендере
-    });
+  // [2.2] Месячная статистика + [6.5] isError для error-state в модалке
+  const {
+    data: monthlySummary = [],
+    isLoading: summaryLoading,
+    isError: summaryError,
+  } = useQuery<MonthlySummaryItem[]>({
+    queryKey: ["/api/transactions/monthly-summary"],
+    staleTime: 60_000,
+  });
 
-  // Реальный баланс — сумма дебетовых карт, наличных и прочих (без кредиток)
+  // [6.5] Retry: инвалидируем кэш и перезапрашиваем
+  function handleSummaryRetry() {
+    queryClient.invalidateQueries({ queryKey: ["/api/transactions/monthly-summary"] });
+  }
+
   const totalBalance = accounts
     .filter(a => !a.isArchived && (a.type === "debit" || a.type === "cash" || a.type === "other"))
     .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
 
-  // [1.2] Фильтрация транзакций по выбранному месяцу
   const monthTxs = transactions.filter(t => t.date.startsWith(currentDisplayMonth));
-  const income  = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expense = monthTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const income   = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense  = monthTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
 
-  // [1.3] Название месяца без года: "Март", "Апрель" и т.д.
-  const monthLabel = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
+  const monthLabel    = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
   const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
 
-  // Last 7 days chart data
   const last7 = Array.from({ length: 7 }, (_, i) => {
     const d = subDays(new Date(), 6 - i);
     const dateStr = format(d, "yyyy-MM-dd");
     const dayTxs = transactions.filter(t => t.date === dateStr);
     return {
-      day: format(d, "EEE", { locale: ru }),
-      income: dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
+      day:     format(d, "EEE", { locale: ru }),
+      income:  dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
       expense: dayTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0),
     };
   });
 
-  // Expense by category for pie chart
   const catData = Object.entries(
     transactions
       .filter(t => t.type === "expense")
@@ -125,20 +128,17 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* [2.2, 3.1-3.3] Доходы: иконка календаря с tooltip + модалка */}
           <Card data-testid="kpi-income">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Доходы</span>
                 <div className="flex items-center gap-1.5">
-                  {/* [3.1] Иконка TrendingUp */}
                   <TrendingUp size={16} className="text-income" />
-                  {/* [3.2] Иконка календаря с tooltip */}
                   <Tooltip delayDuration={200}>
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => setModalOpen(true)}
-                        className="p-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
+                        className="p-0.5 rounded hover:bg-muted transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                         aria-label="История доходов по месяцам"
                       >
                         <CalendarDays size={14} className="text-muted-foreground/70 hover:text-primary transition-colors" />
@@ -157,7 +157,6 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Расходы за выбранный месяц */}
           <Card data-testid="kpi-expense">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
@@ -186,7 +185,6 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Area chart */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Активность за 7 дней</CardTitle>
@@ -226,7 +224,6 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Pie chart */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Расходы по категориям</CardTitle>
@@ -260,7 +257,6 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Recent transactions */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -287,7 +283,6 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Savings goals */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -319,12 +314,14 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* [4.1] Модальное окно с heatmap-календарём */}
+        {/* [4.1 + 6.5] Модальное окно с heatmap + error state */}
         <MonthlyIncomeModal
           isOpen={modalOpen}
           onClose={() => setModalOpen(false)}
           data={monthlySummary}
           isLoading={summaryLoading}
+          isError={summaryError}
+          onRetry={handleSummaryRetry}
           selectedMonth={currentDisplayMonth}
           onSelectMonth={setCurrentDisplayMonth}
         />
