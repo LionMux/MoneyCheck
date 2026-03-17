@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { Transaction, Budget, SavingsGoal, UserProgress } from "@shared/schema";
+import type { Transaction, Budget, SavingsGoal, UserProgress, Account } from "@shared/schema";
 import { TrendingUp, TrendingDown, Wallet, Target, BookOpen, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
-import { format, subDays, parseISO } from "date-fns";
+import { format, subDays } from "date-fns";
 import { ru } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
@@ -33,10 +33,15 @@ export default function Dashboard() {
   const { data: budgets = [] } = useQuery<Budget[]>({ queryKey: ["/api/budgets"] });
   const { data: goals = [] } = useQuery<SavingsGoal[]>({ queryKey: ["/api/goals"] });
   const { data: progress } = useQuery<UserProgress>({ queryKey: ["/api/progress"] });
+  const { data: accounts = [] } = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
+
+  // Реальный баланс — сумма дебетовых карт, наличных и прочих (без кредиток)
+  const totalBalance = accounts
+    .filter(a => !a.isArchived && (a.type === "debit" || a.type === "cash" || a.type === "other"))
+    .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
 
   const income = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const expense = transactions.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
-  const balance = income - expense;
 
   // Last 7 days chart data
   const last7 = Array.from({ length: 7 }, (_, i) => {
@@ -82,10 +87,10 @@ export default function Dashboard() {
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Баланс</span>
               <Wallet size={16} className="text-primary" />
             </div>
-            <p className={cn("text-xl font-bold tabular-nums", balance >= 0 ? "text-income" : "text-expense")}>
-              {fmt(balance)}
+            <p className={cn("text-xl font-bold tabular-nums", totalBalance >= 0 ? "text-income" : "text-expense")}>
+              {fmt(totalBalance)}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">за всё время</p>
+            <p className="text-xs text-muted-foreground mt-1">дебет + наличные</p>
           </CardContent>
         </Card>
         <Card data-testid="kpi-income">

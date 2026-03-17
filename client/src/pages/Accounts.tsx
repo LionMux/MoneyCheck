@@ -31,17 +31,10 @@ const ACCOUNT_TYPES = [
   { value: "other",  label: "Другое",     icon: Wallet,     color: "bg-purple-500" },
 ] as const;
 
-type AccountType = typeof ACCOUNT_TYPES[number]["value"];
+// Доступные цвета карты — добавлен чёрный (#1a1a1a)
+const CARD_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#ec4899", "#1a1a1a"];
 
-function AccountIcon({ type, className }: { type: string; className?: string }) {
-  const config = ACCOUNT_TYPES.find(t => t.value === type) ?? ACCOUNT_TYPES[3];
-  const Icon = config.icon;
-  return (
-    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.color} ${className ?? ""}`}>
-      <Icon size={18} className="text-white" />
-    </div>
-  );
-}
+type AccountType = typeof ACCOUNT_TYPES[number]["value"];
 
 function AccountTypeBadge({ type }: { type: string }) {
   const config = ACCOUNT_TYPES.find(t => t.value === type);
@@ -129,7 +122,6 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          {/* Для кредитной карты поле означает текущий остаток на карте (не долг) */}
           <Label>{type === "credit" ? "Остаток на карте (₽)" : "Баланс (₽)"}</Label>
           <Input
             type="number"
@@ -170,16 +162,19 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 
       <div className="space-y-1.5">
         <Label>Цвет карты</Label>
-        <div className="flex gap-2">
-          {["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#ec4899"].map(c => (
+        <div className="flex gap-2 flex-wrap">
+          {CARD_COLORS.map(c => (
             <button
               key={c}
               type="button"
               onClick={() => setColor(c)}
               className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                color === c ? "border-foreground scale-110" : "border-transparent"
+                color === c
+                  ? "border-foreground scale-110 ring-2 ring-offset-1 ring-foreground"
+                  : "border-transparent"
               }`}
               style={{ backgroundColor: c }}
+              aria-label={c}
             />
           ))}
         </div>
@@ -196,7 +191,6 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 
 function CreditCardDetail({ account }: { account: Account }) {
   const limit = account.creditLimit ? parseFloat(String(account.creditLimit)) : null;
-  // initialBalance хранит остаток на карте; долг = лимит − остаток
   const remaining = parseFloat(String(account.initialBalance ?? 0));
   const debt = limit !== null ? Math.max(limit - remaining, 0) : 0;
   const available = limit !== null ? remaining : null;
@@ -236,13 +230,12 @@ function CreditCardDetail({ account }: { account: Account }) {
           <Progress value={usedPct} className={`h-2 ${usedPct > 80 ? "[&>div]:bg-red-500" : usedPct > 50 ? "[&>div]:bg-amber-500" : "[&>div]:bg-emerald-500"}`} />
         </div>
       )}
-      {debt > 0 && (
+      {debt > 0 ? (
         <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
           <AlertCircle size={12} />
           Оплатите задолженность до даты платежа
         </div>
-      )}
-      {debt === 0 && (
+      ) : (
         <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
           <CheckCircle size={12} />
           Задолженностей нет
@@ -285,14 +278,7 @@ function AccountCard({ account }: { account: Account }) {
               )}
             </div>
             <div>
-              <div className="font-semibold flex items-center gap-2">
-                {account.name}
-                {false && (
-                  <Badge className="text-xs py-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300">
-                    Основной
-                  </Badge>
-                )}
-              </div>
+              <div className="font-semibold">{account.name}</div>
               <AccountTypeBadge type={account.type} />
             </div>
           </div>
@@ -345,12 +331,10 @@ function AccountCard({ account }: { account: Account }) {
 function AccountsSummary({ accounts }: { accounts: Account[] }) {
   const active = accounts.filter(a => !a.isArchived);
 
-  // Общий баланс — только дебетовые карты и наличные (реальные деньги)
   const totalBalance = active
     .filter(a => a.type === "debit" || a.type === "cash" || a.type === "other")
     .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
 
-  // Кредитный долг — сумма долгов по кредитным картам (лимит − остаток)
   const totalDebt = active
     .filter(a => a.type === "credit")
     .reduce((s, a) => {
@@ -390,13 +374,10 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">Мои счета</h1>
-          <p className="text-sm text-muted-foreground">
-            {active.length} активных счётов
-          </p>
+          <p className="text-sm text-muted-foreground">{active.length} активных счётов</p>
         </div>
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogTrigger asChild>
@@ -406,104 +387,65 @@ export default function AccountsPage() {
             </Button>
           </DialogTrigger>
           <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Новый счёт</DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Новый счёт</DialogTitle></DialogHeader>
             <AccountForm onDone={() => setAddOpen(false)} />
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Summary */}
       {active.length > 0 && <AccountsSummary accounts={accounts} />}
 
-      {/* Loading skeleton */}
       {isLoading && (
         <div className="grid gap-4">
           {[1, 2].map(i => (
-            <Card key={i}>
-              <CardContent className="pt-4">
-                <div className="h-16 bg-muted animate-pulse rounded-lg" />
-              </CardContent>
-            </Card>
+            <Card key={i}><CardContent className="pt-4"><div className="h-16 bg-muted animate-pulse rounded-lg" /></CardContent></Card>
           ))}
         </div>
       )}
 
-      {/* Empty state */}
       {!isLoading && active.length === 0 && (
         <Card>
           <CardContent className="py-12 text-center">
             <Wallet size={40} className="mx-auto text-muted-foreground mb-3" />
             <h3 className="font-semibold mb-1">Нет счётов</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Добавьте дебетовую карту, кредитную карту или кошелёк с наличными
-            </p>
-            <Button onClick={() => setAddOpen(true)} className="gap-2">
-              <Plus size={16} />
-              Добавить первый счёт
-            </Button>
+            <p className="text-sm text-muted-foreground mb-4">Добавьте дебетовую карту, кредитную карту или кошелёк с наличными</p>
+            <Button onClick={() => setAddOpen(true)} className="gap-2"><Plus size={16} />Добавить первый счёт</Button>
           </CardContent>
         </Card>
       )}
 
-      {/* Debit accounts */}
       {byType("debit").length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Дебетовые карты
-          </h2>
-          <div className="grid gap-3">
-            {byType("debit").map(a => <AccountCard key={a.id} account={a} />)}
-          </div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Дебетовые карты</h2>
+          <div className="grid gap-3">{byType("debit").map(a => <AccountCard key={a.id} account={a} />)}</div>
         </section>
       )}
 
-      {/* Credit accounts */}
       {byType("credit").length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Кредитные карты
-          </h2>
-          <div className="grid gap-3">
-            {byType("credit").map(a => <AccountCard key={a.id} account={a} />)}
-          </div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Кредитные карты</h2>
+          <div className="grid gap-3">{byType("credit").map(a => <AccountCard key={a.id} account={a} />)}</div>
         </section>
       )}
 
-      {/* Cash accounts */}
       {byType("cash").length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Наличные
-          </h2>
-          <div className="grid gap-3">
-            {byType("cash").map(a => <AccountCard key={a.id} account={a} />)}
-          </div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Наличные</h2>
+          <div className="grid gap-3">{byType("cash").map(a => <AccountCard key={a.id} account={a} />)}</div>
         </section>
       )}
 
-      {/* Other accounts */}
       {byType("other").length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Другие счета
-          </h2>
-          <div className="grid gap-3">
-            {byType("other").map(a => <AccountCard key={a.id} account={a} />)}
-          </div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Другие счета</h2>
+          <div className="grid gap-3">{byType("other").map(a => <AccountCard key={a.id} account={a} />)}</div>
         </section>
       )}
 
-      {/* Archived */}
       {archived.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Архив ({archived.length})
-          </h2>
-          <div className="grid gap-3 opacity-60">
-            {archived.map(a => <AccountCard key={a.id} account={a} />)}
-          </div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Архив ({archived.length})</h2>
+          <div className="grid gap-3 opacity-60">{archived.map(a => <AccountCard key={a.id} account={a} />)}</div>
         </section>
       )}
     </div>
