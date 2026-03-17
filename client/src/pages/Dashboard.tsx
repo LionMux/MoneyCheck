@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, PieChart, Pie, Cell
+  ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from "recharts";
 import { format, subDays } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -39,8 +39,9 @@ function fmtY(v: number): string {
 }
 
 /**
- * Стиль толтипа Recharts — использует CSS-переменные темы.
- * color явно задан — без этого Recharts ставит #000 в тёмной теме.
+ * Базовый стиль толтипа Recharts.
+ * itemStyle + labelStyle явно задают цвет —
+ * без этого Recharts рисует #666 и #000 поверх тёмного фона.
  */
 const TOOLTIP_STYLE: React.CSSProperties = {
   background: "hsl(var(--card))",
@@ -48,6 +49,13 @@ const TOOLTIP_STYLE: React.CSSProperties = {
   borderRadius: "8px",
   fontSize: 12,
   color: "hsl(var(--card-foreground))",
+};
+const TOOLTIP_ITEM_STYLE: React.CSSProperties = {
+  color: "hsl(var(--card-foreground))",
+};
+const TOOLTIP_LABEL_STYLE: React.CSSProperties = {
+  color: "hsl(var(--muted-foreground))",
+  marginBottom: 2,
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -206,6 +214,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Area chart */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Активность за 7 дней</CardTitle>
@@ -237,8 +246,12 @@ export default function Dashboard() {
                     tickFormatter={fmtY}
                     width={42}
                   />
-                  {/* Исправлено: явный color — без него Recharts пишет #000 в тёмной теме */}
-                  <RechartsTooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [fmt(v)]} />
+                  <RechartsTooltip
+                    contentStyle={TOOLTIP_STYLE}
+                    itemStyle={TOOLTIP_ITEM_STYLE}
+                    labelStyle={TOOLTIP_LABEL_STYLE}
+                    formatter={(v: number) => [fmt(v)]}
+                  />
                   <Area type="monotone" dataKey="income" stroke="#20808D" strokeWidth={2} fill="url(#incomeGrad)" name="Доход" />
                   <Area type="monotone" dataKey="expense" stroke="#A84B2F" strokeWidth={2} fill="url(#expenseGrad)" name="Расход" />
                 </AreaChart>
@@ -254,34 +267,48 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
+          {/* Pie chart — центрирована, без списка справа */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Расходы по категориям</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-4">
-                <ResponsiveContainer width={130} height={130}>
-                  <PieChart>
-                    <Pie data={catData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={3} dataKey="value">
-                      {catData.map((entry, i) => (
-                        <Cell key={i} fill={CATEGORY_COLORS[entry.name] ?? "#848456"} />
-                      ))}
-                    </Pie>
-                    {/* Исправлено: тот же TOOLTIP_STYLE — чёрный текст на тёмном фоне больше не будет */}
-                    <RechartsTooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [fmt(v)]} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex-1 space-y-1.5">
-                  {catData.map((entry) => (
-                    <div key={entry.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CATEGORY_COLORS[entry.name] ?? "#848456" }} />
-                        <span className="text-xs text-muted-foreground">{entry.name}</span>
-                      </div>
-                      <span className="text-xs font-medium tabular-nums">{fmt(entry.value)}</span>
-                    </div>
-                  ))}
-                </div>
+            <CardContent className="flex flex-col items-center gap-3 pt-1">
+              {/* Диаграмма центрирована, немного увеличена */}
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie
+                    data={catData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={48}
+                    outerRadius={72}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {catData.map((entry, i) => (
+                      <Cell key={i} fill={CATEGORY_COLORS[entry.name] ?? "#848456"} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip
+                    contentStyle={TOOLTIP_STYLE}
+                    itemStyle={TOOLTIP_ITEM_STYLE}
+                    labelStyle={TOOLTIP_LABEL_STYLE}
+                    formatter={(v: number) => [fmt(v)]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+
+              {/* Легенда под диаграммой — без сумм */}
+              <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 w-full">
+                {catData.map((entry) => (
+                  <span key={entry.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ background: CATEGORY_COLORS[entry.name] ?? "#848456" }}
+                    />
+                    {entry.name}
+                  </span>
+                ))}
               </div>
             </CardContent>
           </Card>
