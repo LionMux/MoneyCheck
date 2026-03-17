@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +22,7 @@ interface Props {
   onClose: () => void;
   data: MonthlySummaryItem[];
   isLoading: boolean;
-  selectedMonth: string;        // "YYYY-MM" — текущий выбранный месяц в KPI
+  selectedMonth: string;
   onSelectMonth: (month: string) => void;
 }
 
@@ -36,7 +36,6 @@ function fmt(n: number): string {
   return String(Math.round(n));
 }
 
-// 5-уровневая шкала интенсивности по доходу
 function getHeatColor(income: number, maxIncome: number): string {
   if (maxIncome === 0 || income === 0) return "hsl(var(--muted))";
   const ratio = income / maxIncome;
@@ -59,7 +58,6 @@ export function MonthlyIncomeModal({
   const currentYear = new Date().getFullYear();
   const [displayYear, setDisplayYear] = useState<number>(currentYear);
 
-  // Данные за отображаемый год
   const yearData = useMemo(() => {
     const map: Record<number, MonthlySummaryItem> = {};
     for (const item of data) {
@@ -73,9 +71,6 @@ export function MonthlyIncomeModal({
     return Math.max(0, ...Object.values(yearData).map(d => d.income));
   }, [yearData]);
 
-  const hasDataForYear = (y: number) =>
-    data.some(d => d.month.startsWith(String(y)));
-
   const minYear = data.length > 0
     ? Number(data[0].month.split("-")[0])
     : currentYear;
@@ -83,39 +78,39 @@ export function MonthlyIncomeModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-lg w-full p-0 overflow-hidden">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-base font-semibold">
-              История доходов
-            </DialogTitle>
-            {/* Переключатель года */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setDisplayYear(y => y - 1)}
-                disabled={displayYear <= minYear}
-                className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
-                aria-label="Предыдущий год"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span className="text-sm font-medium w-10 text-center tabular-nums">
-                {displayYear}
-              </span>
-              <button
-                onClick={() => setDisplayYear(y => y + 1)}
-                disabled={displayYear >= currentYear}
-                className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors"
-                aria-label="Следующий год"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
+
+        {/* Заголовок: только название, крестик шадкн рендерит сам — даём ему место */}
+        <DialogHeader className="px-5 pt-5 pb-0">
+          <DialogTitle className="text-base font-semibold">
+            История доходов
+          </DialogTitle>
         </DialogHeader>
+
+        {/* Переключатель года — отдельная строка под заголовком, центрированна */}
+        <div className="flex items-center justify-center gap-3 px-5 pt-3 pb-3 border-b border-border">
+          <button
+            onClick={() => setDisplayYear(y => y - 1)}
+            disabled={displayYear <= minYear}
+            className="p-1.5 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+            aria-label="Предыдущий год"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-sm font-semibold w-12 text-center tabular-nums select-none">
+            {displayYear}
+          </span>
+          <button
+            onClick={() => setDisplayYear(y => y + 1)}
+            disabled={displayYear >= currentYear}
+            className="p-1.5 rounded hover:bg-muted disabled:opacity-30 transition-colors"
+            aria-label="Следующий год"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
 
         <div className="px-5 py-4">
           {isLoading ? (
-            // Loading state: скелетон 12 ячеек
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {Array.from({ length: 12 }).map((_, i) => (
                 <Skeleton key={i} className="h-16 rounded-lg" />
@@ -136,7 +131,7 @@ export function MonthlyIncomeModal({
                 return (
                   <button
                     key={monthStr}
-                    disabled={isFuture || incomeVal === 0 && !entry}
+                    disabled={isFuture || (incomeVal === 0 && !entry)}
                     onClick={() => {
                       onSelectMonth(monthStr);
                       onClose();
@@ -165,9 +160,7 @@ export function MonthlyIncomeModal({
                       {fmt(incomeVal)}
                     </span>
                     {isSelected && (
-                      <span
-                        className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary"
-                      />
+                      <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary" />
                     )}
                   </button>
                 );
@@ -192,6 +185,7 @@ export function MonthlyIncomeModal({
             </div>
           )}
         </div>
+
       </DialogContent>
     </Dialog>
   );
