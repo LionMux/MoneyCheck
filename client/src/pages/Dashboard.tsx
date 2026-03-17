@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Transaction, Budget, SavingsGoal, UserProgress, Account } from "@shared/schema";
 import { TrendingUp, TrendingDown, Wallet, Target, BookOpen, ArrowRight } from "lucide-react";
@@ -29,6 +30,11 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  // [1.1] Текущий выбранный месяц в формате "YYYY-MM", по умолчанию — сегодняшний месяц
+  const [currentDisplayMonth, setCurrentDisplayMonth] = useState<string>(
+    format(new Date(), "yyyy-MM")
+  );
+
   const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
   const { data: budgets = [] } = useQuery<Budget[]>({ queryKey: ["/api/budgets"] });
   const { data: goals = [] } = useQuery<SavingsGoal[]>({ queryKey: ["/api/goals"] });
@@ -40,8 +46,15 @@ export default function Dashboard() {
     .filter(a => !a.isArchived && (a.type === "debit" || a.type === "cash" || a.type === "other"))
     .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
 
-  const income = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expense = transactions.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
+  // [1.2] Фильтрация транзакций по выбранному месяцу
+  const monthTxs = transactions.filter(t => t.date.startsWith(currentDisplayMonth));
+  const income  = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense = monthTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  // [1.3] Название месяца без года: "Март", "Апрель" и т.д.
+  const monthLabel = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
+  // Первая буква заглавная (date-fns LLLL возвращает строчную в ru)
+  const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
 
   // Last 7 days chart data
   const last7 = Array.from({ length: 7 }, (_, i) => {
@@ -93,6 +106,8 @@ export default function Dashboard() {
             <p className="text-xs text-muted-foreground mt-1">дебет + наличные</p>
           </CardContent>
         </Card>
+
+        {/* [1.2, 1.3] Доходы за выбранный месяц */}
         <Card data-testid="kpi-income">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
@@ -100,9 +115,13 @@ export default function Dashboard() {
               <TrendingUp size={16} className="text-income" />
             </div>
             <p className="text-xl font-bold tabular-nums text-income">{fmt(income)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{transactions.filter(t => t.type === "income").length} операций</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {monthLabelCap} · {monthTxs.filter(t => t.type === "income").length} операций
+            </p>
           </CardContent>
         </Card>
+
+        {/* Расходы за выбранный месяц */}
         <Card data-testid="kpi-expense">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
@@ -110,9 +129,12 @@ export default function Dashboard() {
               <TrendingDown size={16} className="text-expense" />
             </div>
             <p className="text-xl font-bold tabular-nums text-expense">{fmt(expense)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{transactions.filter(t => t.type === "expense").length} операций</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {monthLabelCap} · {monthTxs.filter(t => t.type === "expense").length} операций
+            </p>
           </CardContent>
         </Card>
+
         <Card data-testid="kpi-savings">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
