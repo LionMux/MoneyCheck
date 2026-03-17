@@ -38,11 +38,6 @@ function fmtY(v: number): string {
   return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
 }
 
-/**
- * Базовый стиль толтипа Recharts.
- * itemStyle + labelStyle явно задают цвет —
- * без этого Recharts рисует #666 и #000 поверх тёмного фона.
- */
 const TOOLTIP_STYLE: React.CSSProperties = {
   background: "hsl(var(--card))",
   border: "1px solid hsl(var(--border))",
@@ -250,7 +245,7 @@ export default function Dashboard() {
                     contentStyle={TOOLTIP_STYLE}
                     itemStyle={TOOLTIP_ITEM_STYLE}
                     labelStyle={TOOLTIP_LABEL_STYLE}
-                    formatter={(v: number) => [fmt(v)]}
+                    formatter={(v: number, name: string) => [fmt(v), name]}
                   />
                   <Area type="monotone" dataKey="income" stroke="#20808D" strokeWidth={2} fill="url(#incomeGrad)" name="Доход" />
                   <Area type="monotone" dataKey="expense" stroke="#A84B2F" strokeWidth={2} fill="url(#expenseGrad)" name="Расход" />
@@ -273,7 +268,6 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-semibold">Расходы по категориям</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-3 pt-1">
-              {/* Диаграмма центрирована, немного увеличена */}
               <ResponsiveContainer width="100%" height={160}>
                 <PieChart>
                   <Pie
@@ -293,7 +287,7 @@ export default function Dashboard() {
                     contentStyle={TOOLTIP_STYLE}
                     itemStyle={TOOLTIP_ITEM_STYLE}
                     labelStyle={TOOLTIP_LABEL_STYLE}
-                    formatter={(v: number) => [fmt(v)]}
+                    formatter={(v: number, name: string) => [fmt(v), name]}
                   />
                 </PieChart>
               </ResponsiveContainer>
