@@ -364,6 +364,28 @@ export class PgStorage {
     const [existing] = await db.select().from(S.savingsGoals)
       .where(and(eq(S.savingsGoals.id, id), eq(S.savingsGoals.userId, userId)));
     if (!existing) throw new Error("Goal not found");
+
+    // If goal is linked to an account — check balance and create expense transaction
+    if (existing.accountId) {
+      const balance = await this.getAccountBalance(existing.accountId);
+      if (balance < amount) {
+        throw new Error(`Недостаточно средств на счёте. Доступно: ${balance.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
+      }
+      await db.insert(S.transactions).values({
+        userId,
+        accountId: existing.accountId,
+        title: `Пополнение цели: ${existing.title}`,
+        amount: -amount,
+        currency: "RUB",
+        category: "Сбережения",
+        type: "expense",
+        date: today(),
+        note: `Перевод на цель #${id}`,
+        isPlanned: false,
+        createdAt: now(),
+      });
+    }
+
     const newAmount = Math.min(existing.currentAmount + amount, existing.targetAmount);
     const [g] = await db.update(S.savingsGoals)
       .set({ currentAmount: newAmount })

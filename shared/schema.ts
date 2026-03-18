@@ -109,6 +109,7 @@ export type Budget = typeof budgets.$inferSelect;
 export const savingsGoals = pgTable("savings_goals", {
   id:            serial("id").primaryKey(),
   userId:        integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId:     integer("account_id").references(() => accounts.id, { onDelete: "set null" }),
   title:         text("title").notNull(),
   targetAmount:  real("target_amount").notNull(),
   currentAmount: real("current_amount").notNull().default(0),
@@ -203,9 +204,15 @@ export const usersRelations = relations(users, ({ many, one }) => ({
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
   user: one(users, { fields: [accounts.userId], references: [users.id] }),
   transactions: many(transactions),
+  savingsGoals: many(savingsGoals),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
   user: one(users, { fields: [transactions.userId], references: [users.id] }),
   account: one(accounts, { fields: [transactions.accountId], references: [accounts.id] }),
+}));
+
+export const savingsGoalsRelations = relations(savingsGoals, ({ one }) => ({
+  user: one(users, { fields: [savingsGoals.userId], references: [users.id] }),
+  account: one(accounts, { fields: [savingsGoals.accountId], references: [accounts.id] }),
 }));

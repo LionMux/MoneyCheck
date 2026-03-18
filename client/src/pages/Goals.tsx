@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { SavingsGoal, InsertSavingsGoal } from "@shared/schema";
+import type { SavingsGoal, InsertSavingsGoal, Account } from "@shared/schema";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Plus, Trash2, Target, Shield, Plane, Laptop, Home, Car, GraduationCap } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Trash2, Target, Shield, Plane, Laptop, Home, Car, GraduationCap, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format, differenceInDays } from "date-fns";
@@ -38,6 +40,7 @@ export default function Goals() {
   const [form, setForm] = useState<Partial<InsertSavingsGoal>>({ color: PRESET_COLORS[0], icon: "Target" });
 
   const { data: goals = [] } = useQuery<SavingsGoal[]>({ queryKey: ["/api/goals"] });
+  const { data: accounts = [] } = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
 
   const addMut = useMutation({
     mutationFn: (data: InsertSavingsGoal) => apiRequest("POST", "/api/goals", data),
@@ -54,9 +57,14 @@ export default function Goals() {
       apiRequest("PATCH", `/api/goals/${id}/deposit`, { amount }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/goals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
       setDepositOpen(null);
       setDepositAmount("");
       toast({ title: "Сумма добавлена к цели" });
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Не удалось пополнить цель";
+      toast({ title: "Ошибка пополнения", description: message, variant: "destructive" });
     },
   });
 
@@ -70,11 +78,25 @@ export default function Goals() {
       toast({ title: "Заполните обязательные поля", variant: "destructive" });
       return;
     }
-    addMut.mutate({ title: form.title, targetAmount: Number(form.targetAmount), currentAmount: 0, deadline: form.deadline ?? null, icon: form.icon ?? "Target", color: form.color ?? PRESET_COLORS[0] });
+    addMut.mutate({
+      title: form.title,
+      targetAmount: Number(form.targetAmount),
+      currentAmount: 0,
+      deadline: form.deadline ?? null,
+      icon: form.icon ?? "Target",
+      color: form.color ?? PRESET_COLORS[0],
+      accountId: form.accountId ?? null,
+    });
   };
 
   const totalSaved = goals.reduce((s, g) => s + g.currentAmount, 0);
   const totalTarget = goals.reduce((s, g) => s + g.targetAmount, 0);
+
+  // Find the goal currently open for deposit (to show its linked account balance)
+  const depositGoal = depositOpen !== null ? goals.find(g => g.id === depositOpen) : null;
+  const depositAccountBalance = depositGoal?.accountId
+    ? accounts.find(a => a.id === depositGoal.accountId)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -111,6 +133,7 @@ export default function Goals() {
           const remaining = goal.targetAmount - goal.currentAmount;
           const daysLeft = goal.deadline ? differenceInDays(new Date(goal.deadline), new Date()) : null;
           const done = pct >= 100;
+          const linkedAccount = goal.accountId ? accounts.find(a => a.id === goal.accountId) : null;
 
           return (
             <Card key={goal.id} data-testid={`goal-card-${goal.id}`}
@@ -125,10 +148,16 @@ export default function Goals() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
+                      <div className="space-y-1">
                         <h3 className="font-semibold text-sm leading-none">{goal.title}</h3>
+                        {linkedAccount && (
+                          <Badge variant="secondary" className="text-xs gap-1 px-1.5 py-0">
+                            <Wallet size={10} />
+                            {linkedAccount.name}
+                          </Badge>
+                        )}
                         {daysLeft !== null && (
-                          <span className={cn("text-xs mt-0.5 block", daysLeft < 14 ? "text-expense" : "text-muted-foreground")}>
+                          <span className={cn("text-xs block", daysLeft < 14 ? "text-expense" : "text-muted-foreground")}>
                             {daysLeft > 0 ? `${daysLeft} дней осталось` : done ? "Цель достигнута!" : "Срок истёк"}
                           </span>
                         )}
@@ -199,6 +228,28 @@ export default function Goals() {
               <Input data-testid="input-goal-target" type="number" placeholder="100000" value={form.targetAmount ?? ""} onChange={e => setForm(f => ({ ...f, targetAmount: Number(e.target.value) }))} className="mt-1" />
             </div>
             <div>
+              <Label>Счёт для пополнения <span className="text-muted-foreground font-normal">(опционально)</span></Label>
+              <Select
+                value={form.accountId != null ? String(form.accountId) : "none"}
+                onValueChange={v => setForm(f => ({ ...f, accountId: v === "none" ? null : Number(v) }))}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Без привязки к счёту" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Без привязки к счёту</SelectItem>
+                  {accounts.map(acc => (
+                    <SelectItem key={acc.id} value={String(acc.id)}>
+                      {acc.name} · {acc.currency}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                При пополнении цели деньги будут списаны с выбранного счёта
+              </p>
+            </div>
+            <div>
               <Label>Срок (необязательно)</Label>
               <Input type="date" value={form.deadline ?? ""} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} className="mt-1" />
             </div>
@@ -240,24 +291,35 @@ export default function Goals() {
       </Dialog>
 
       {/* Deposit Dialog */}
-      <Dialog open={depositOpen !== null} onOpenChange={() => setDepositOpen(null)}>
+      <Dialog open={depositOpen !== null} onOpenChange={() => { setDepositOpen(null); setDepositAmount(""); }}>
         <DialogContent className="sm:max-w-xs">
           <DialogHeader>
             <DialogTitle>Пополнить цель</DialogTitle>
           </DialogHeader>
-          <div>
-            <Label>Сумма (₽)</Label>
-            <Input
-              data-testid="input-deposit-amount"
-              type="number"
-              placeholder="5000"
-              value={depositAmount}
-              onChange={e => setDepositAmount(e.target.value)}
-              className="mt-1"
-            />
+          <div className="space-y-3">
+            {depositAccountBalance && (
+              <div className="rounded-lg bg-muted px-3 py-2 flex items-center gap-2 text-sm">
+                <Wallet size={14} className="text-muted-foreground" />
+                <span className="text-muted-foreground">Баланс счёта</span>
+                <span className="ml-auto font-semibold tabular-nums">
+                  {fmt(depositAccountBalance.initialBalance)}
+                </span>
+              </div>
+            )}
+            <div>
+              <Label>Сумма (₽)</Label>
+              <Input
+                data-testid="input-deposit-amount"
+                type="number"
+                placeholder="5000"
+                value={depositAmount}
+                onChange={e => setDepositAmount(e.target.value)}
+                className="mt-1"
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDepositOpen(null)}>Отмена</Button>
+            <Button variant="outline" onClick={() => { setDepositOpen(null); setDepositAmount(""); }}>Отмена</Button>
             <Button
               onClick={() => {
                 if (depositOpen && depositAmount) {
