@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useQuery } from "@tanstack/react-query";
@@ -5,7 +6,7 @@ import type { UserProgress } from "@shared/schema";
 import {
   LayoutDashboard, ArrowLeftRight, PieChart,
   Target, BookOpen, Sun, Moon, Zap, Star,
-  Wallet, Bell, LogOut
+  Wallet, Bell, LogOut, Menu, X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import PerplexityAttribution from "@/components/PerplexityAttribution";
@@ -29,9 +30,12 @@ const navItems: NavItem[] = [
   { href: "/notifications", label: "Уведомления", icon: <Bell size={18} />, testId: "nav-notifications" },
 ];
 
+const mobileNavItems = navItems.slice(0, 5);
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useHashLocation();
   const { user, logout, isDemo } = useAuth();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { data: progress } = useQuery<UserProgress>({
     queryKey: ["/api/progress"],
@@ -41,6 +45,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     queryKey: ["/api/notifications"],
     enabled: !isDemo && !!user,
   });
+
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const toggleTheme = () => {
@@ -50,118 +55,190 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const xpInLevel = progress ? progress.totalXp % 200 : 0;
   const xpPct = Math.round((xpInLevel / 200) * 100);
 
+  const isActive = (href: string) =>
+    location === href || (href === "/" && (location === "" || location === "/"));
+
+  const SidebarContent = () => (
+    <>
+      <div className="px-5 pt-6 pb-4 border-b border-sidebar-border">
+        <div className="flex items-center gap-2.5">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-label="FinWise logo">
+            <rect width="32" height="32" rx="8" fill="hsl(158 64% 32%)" />
+            <path d="M8 22V12M12 22V16M16 22V8M20 22V14M24 22V18" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+          </svg>
+          <span className="font-bold text-xl text-sidebar-foreground tracking-tight">FinWise</span>
+        </div>
+      </div>
+
+      <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+        {navItems.map((item) => (
+          <Link key={item.href} href={item.href}>
+            <a
+              data-testid={item.testId}
+              onClick={() => setDrawerOpen(false)}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full",
+                isActive(item.href)
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+              )}
+            >
+              {item.icon}
+              {item.label}
+              {item.href === "/notifications" && unreadCount > 0 && (
+                <Badge variant="destructive" className="ml-auto text-[10px] px-1.5 py-0 h-4">
+                  {unreadCount}
+                </Badge>
+              )}
+            </a>
+          </Link>
+        ))}
+      </nav>
+
+      {progress && (
+        <div className="px-4 py-3 border-t border-sidebar-border">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Star size={13} className="text-yellow-500" />
+            <span className="text-xs font-medium text-sidebar-foreground">Уровень {progress.level}</span>
+            <span className="text-xs text-sidebar-foreground/50 ml-auto">{xpInLevel} / 200 XP</span>
+          </div>
+          <div className="w-full bg-sidebar-border rounded-full h-1.5">
+            <div className="bg-primary h-1.5 rounded-full transition-all" style={{ width: `${xpPct}%` }} />
+          </div>
+          {progress.streak > 0 && (
+            <div className="flex items-center gap-1 mt-1.5">
+              <Zap size={12} className="text-orange-500" />
+              <span className="text-[11px] text-sidebar-foreground/60">{progress.streak} дней подряд</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {user && (
+        <div className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-sidebar-foreground truncate">{user.name}</p>
+            <p className="text-xs text-sidebar-foreground/50 truncate">{user.email}</p>
+          </div>
+          <button
+            onClick={logout}
+            data-testid="btn-logout"
+            title="Выйти"
+            className="p-1.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors flex-shrink-0"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+      )}
+
+      <div className="px-4 py-3 border-t border-sidebar-border flex items-center justify-between">
+        <button
+          onClick={toggleTheme}
+          className="flex items-center gap-2 text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors"
+        >
+          <Sun size={14} className="dark:hidden" />
+          <Moon size={14} className="hidden dark:block" />
+          <span className="dark:hidden">Тёмная тема</span>
+          <span className="hidden dark:block">Светлая тема</span>
+        </button>
+        <PerplexityAttribution />
+      </div>
+    </>
+  );
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-60 flex-shrink-0 flex flex-col bg-sidebar text-sidebar-foreground">
-        {/* Logo */}
-        <div className="px-5 pt-6 pb-4 border-b border-sidebar-border">
-          <div className="flex items-center gap-2.5">
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-label="FinWise logo">
-              <rect width="32" height="32" rx="8" fill="hsl(158 64% 32%)" />
-              <path d="M8 22V16M12 22V12M16 22V8M20 22V14M24 22V18" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
-            <span className="text-lg font-bold text-white" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>
-              FinWise
-            </span>
-          </div>
-        </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {navItems.map((item) => {
-            const isActive = location === item.href || (item.href === "/" && (location === "" || location === "/"));
-            return (
-              <Link key={item.href} href={item.href}>
-                <div
-                  data-testid={item.testId}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer",
-                    isActive
-                      ? "bg-sidebar-primary text-white"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  )}
-                >
+      {/* DESKTOP SIDEBAR */}
+      <aside className="hidden md:flex w-60 flex-shrink-0 flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+        <SidebarContent />
+      </aside>
+
+      {/* MOBILE DRAWER */}
+      {drawerOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex" onClick={() => setDrawerOpen(false)}>
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <aside
+            className="relative z-10 w-72 max-w-[85vw] flex flex-col bg-sidebar text-sidebar-foreground shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setDrawerOpen(false)}
+              className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors z-10"
+            >
+              <X size={18} />
+            </button>
+            <SidebarContent />
+          </aside>
+        </div>
+      )}
+
+      {/* MAIN */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+
+        {/* Mobile header */}
+        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-background border-b border-border flex-shrink-0">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="p-1.5 rounded-lg hover:bg-accent transition-colors"
+            aria-label="Открыть меню"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="flex items-center gap-2">
+            <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+              <rect width="32" height="32" rx="8" fill="hsl(158 64% 32%)" />
+              <path d="M8 22V12M12 22V16M16 22V8M20 22V14M24 22V18" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+            <span className="font-bold text-base">FinWise</span>
+          </div>
+          {unreadCount > 0 && (
+            <Link href="/notifications">
+              <a className="ml-auto relative p-1.5">
+                <Bell size={20} />
+                <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-destructive text-destructive-foreground text-[10px] rounded-full flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              </a>
+            </Link>
+          )}
+        </header>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-y-auto bg-background pb-16 md:pb-0">
+          <div className="p-4 md:p-6 max-w-5xl mx-auto">
+            {children}
+          </div>
+        </main>
+      </div>
+
+      {/* MOBILE BOTTOM NAV */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm">
+        <div className="flex justify-around py-1 px-1">
+          {mobileNavItems.map((item) => (
+            <Link key={item.href} href={item.href}>
+              <a
+                data-testid={item.testId}
+                className={cn(
+                  "flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-colors min-w-[52px]",
+                  isActive(item.href) ? "text-primary" : "text-muted-foreground"
+                )}
+              >
+                <span className="relative">
                   {item.icon}
-                  <span className="flex-1">{item.label}</span>
                   {item.href === "/notifications" && unreadCount > 0 && (
-                    <span className="text-xs bg-emerald-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive text-destructive-foreground text-[8px] rounded-full flex items-center justify-center">
                       {unreadCount}
                     </span>
                   )}
-                </div>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* XP Progress */}
-        {progress && (
-          <div className="px-4 py-4 border-t border-sidebar-border">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <Star size={14} className="text-yellow-400" />
-                <span className="text-xs font-semibold text-white">Уровень {progress.level}</span>
-              </div>
-              <span className="text-xs text-sidebar-foreground">{xpInLevel} / 200 XP</span>
-            </div>
-            <div className="w-full bg-sidebar-accent rounded-full h-1.5">
-              <div
-                className="bg-sidebar-primary h-1.5 rounded-full transition-all duration-700"
-                style={{ width: `${xpPct}%` }}
-              />
-            </div>
-            {progress.streak > 0 && (
-              <div className="flex items-center gap-1 mt-2">
-                <Zap size={12} className="text-yellow-400" />
-                <span className="text-xs text-sidebar-foreground">{progress.streak} дней подряд</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* User info */}
-        {user && (
-          <div className="px-4 py-3 border-t border-sidebar-border">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-white truncate">{user.name}</div>
-                <div className="text-xs text-sidebar-foreground truncate">{user.email}</div>
-              </div>
-              <button
-                onClick={() => logout()}
-                data-testid="btn-logout"
-                title="Выйти"
-                className="p-1.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors"
-              >
-                <LogOut size={14} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Theme + attribution */}
-        <div className="px-4 pb-4 space-y-2">
-          <button
-            onClick={toggleTheme}
-            data-testid="btn-theme-toggle"
-            className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-          >
-            <Sun size={15} className="hidden dark:block" />
-            <Moon size={15} className="block dark:hidden" />
-            <span className="block dark:hidden">Тёмная тема</span>
-            <span className="hidden dark:block">Светлая тема</span>
-          </button>
-          <PerplexityAttribution />
+                </span>
+                <span className="text-[10px] leading-tight font-medium">{item.label}</span>
+              </a>
+            </Link>
+          ))}
         </div>
-      </aside>
+      </nav>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-background">
-        <div className="p-6 max-w-5xl mx-auto">
-          {children}
-        </div>
-      </main>
     </div>
   );
 }
