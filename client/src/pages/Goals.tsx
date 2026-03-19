@@ -106,7 +106,6 @@ export default function Goals() {
         </Button>
       </div>
 
-      {/* Summary bar */}
       {goals.length > 0 && (
         <Card>
           <CardContent className="p-4">
@@ -122,24 +121,20 @@ export default function Goals() {
         </Card>
       )}
 
-      {/* Goal cards */}
       <div className="grid grid-cols-1 gap-4">
         {goals.map(goal => {
           const pct = Math.min(Math.round((goal.currentAmount / goal.targetAmount) * 100), 100);
           const remaining = goal.targetAmount - goal.currentAmount;
           const daysLeft = goal.deadline ? differenceInDays(new Date(goal.deadline), new Date()) : null;
           const done = pct >= 100;
-          const linkedAccount = goal.accountId ? accounts.find(a => a.id === goal.accountId) : null;
+          const linkedAccount = goal.accountId ? accounts.find((a: any) => a.id === goal.accountId) : null;
 
           return (
-            <Card key={goal.id} data-testid={`goal-card-${goal.id}`}
-              className={cn(done && "border-primary/40")}
-            >
+            <Card key={goal.id} data-testid={`goal-card-${goal.id}`} className={cn(done && "border-primary/40")}>
               <CardContent className="p-4">
                 <div className="flex items-start gap-4">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: goal.color + "22", color: goal.color }}
-                  >
+                    style={{ background: goal.color + "22", color: goal.color }}>
                     {ICONS[goal.icon] ?? <Target size={20} />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -149,7 +144,7 @@ export default function Goals() {
                         {linkedAccount && (
                           <Badge variant="secondary" className="text-xs gap-1 px-1.5 py-0">
                             <Wallet size={10} />
-                            {linkedAccount.name}
+                            {(linkedAccount as any).name}
                           </Badge>
                         )}
                         {daysLeft !== null && (
@@ -184,9 +179,7 @@ export default function Goals() {
 
                     {!done && (
                       <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 h-7 text-xs"
+                        variant="outline" size="sm" className="mt-3 h-7 text-xs"
                         onClick={() => setDepositOpen(goal.id)}
                         data-testid={`btn-deposit-${goal.id}`}
                       >
@@ -211,9 +204,7 @@ export default function Goals() {
       {/* Add Goal Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Новая цель</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Новая цель</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label>Название цели</Label>
@@ -231,11 +222,8 @@ export default function Goals() {
               <Label>Иконка</Label>
               <div className="flex gap-2 mt-2 flex-wrap">
                 {Object.entries(ICONS).map(([key, icon]) => (
-                  <button
-                    key={key}
-                    onClick={() => setForm(f => ({ ...f, icon: key }))}
-                    className={cn("w-9 h-9 rounded-lg border flex items-center justify-center transition-all", form.icon === key ? "border-primary bg-primary/10" : "border-border hover:border-primary/50")}
-                  >
+                  <button key={key} onClick={() => setForm(f => ({ ...f, icon: key }))}
+                    className={cn("w-9 h-9 rounded-lg border flex items-center justify-center transition-all", form.icon === key ? "border-primary bg-primary/10" : "border-border hover:border-primary/50")}>
                     {icon}
                   </button>
                 ))}
@@ -245,21 +233,16 @@ export default function Goals() {
               <Label>Цвет</Label>
               <div className="flex gap-2 mt-2">
                 {PRESET_COLORS.map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setForm(f => ({ ...f, color: c }))}
+                  <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))}
                     className={cn("w-7 h-7 rounded-full border-2 transition-all", form.color === c ? "border-foreground scale-110" : "border-transparent")}
-                    style={{ background: c }}
-                  />
+                    style={{ background: c }} />
                 ))}
               </div>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
-            <Button onClick={handleSubmit} data-testid="btn-submit-goal" disabled={addMut.isPending}>
-              Создать
-            </Button>
+            <Button onClick={handleSubmit} data-testid="btn-submit-goal" disabled={addMut.isPending}>Создать</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -268,17 +251,11 @@ export default function Goals() {
       <Dialog
         open={depositOpen !== null}
         onOpenChange={(open) => {
-          if (!open) {
-            setDepositOpen(null);
-            setDepositAmount("");
-            setDepositAccountId(null);
-          }
+          if (!open) { setDepositOpen(null); setDepositAmount(""); setDepositAccountId(null); }
         }}
       >
         <DialogContent className="sm:max-w-xs">
-          <DialogHeader>
-            <DialogTitle>Пополнить цель</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Пополнить цель</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="deposit-account">Счёт (опционально)</Label>
@@ -292,9 +269,8 @@ export default function Goals() {
                 <SelectContent>
                   <SelectItem value="none">Без списания со счёта</SelectItem>
                   {(accounts as any[]).map((acc: any) => {
-                    const displayInfo = acc.type === "credit"
-                      ? `${acc.name} · Доступно: ${fmt((acc.creditLimit ?? 0) - (acc.debt ?? 0))}`
-                      : `${acc.name} · ${fmt(acc.balance ?? 0)}`;
+                    // Для всех типов счетов показываем реальный баланс
+                    const displayInfo = `${acc.name} · ${fmt(acc.balance ?? 0)}`;
                     return <SelectItem key={acc.id} value={String(acc.id)}>{displayInfo}</SelectItem>;
                   })}
                 </SelectContent>

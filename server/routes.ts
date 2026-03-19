@@ -16,7 +16,6 @@ let _pgStorage: import("./storage-pg").PgStorage | null = null;
 
 async function getStorage(): Promise<{ mem: import("./storage").IStorage | null; pg: import("./storage-pg").PgStorage | null }> {
   if (!_storage || !_pgStorage) {
-    // Try PG first, fall back to memory
     if (process.env.DATABASE_URL) {
       try {
         const { pgStorage } = await import("./storage-pg");
@@ -36,8 +35,6 @@ async function getStorage(): Promise<{ mem: import("./storage").IStorage | null;
   return { mem: _storage, pg: _pgStorage };
 }
 
-// ── Helper: get userId from request (falls back to 1 for mem-storage mode) ─
-
 function getUserId(req: AuthRequest): number {
   return req.userId ?? 1;
 }
@@ -48,15 +45,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   const { mem, pg } = await getStorage();
 
-  // Start scheduler if using PG
   if (pg) {
     const { startScheduler } = await import("./scheduler");
     startScheduler(pg);
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // AUTH ROUTES (no middleware)
-  // ────────────────────────────────────────────────────────────────────────
+  // ── AUTH ──────────────────────────────────────────────────────────────────
 
   app.post("/api/auth/register", async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured. Auth requires PostgreSQL." });
@@ -65,10 +59,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       name: z.string().min(1).max(100),
       password: z.string().min(8),
     }).parse(req.body);
-
     const existing = await pg.getUserByEmail(email);
     if (existing) return res.status(409).json({ error: "Email уже зарегистрирован" });
-
     const user = await pg.createUser(email, name, password);
     const token = signJwt(user.id);
     setCookieToken(res, token);
@@ -81,13 +73,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       email: z.string().email(),
       password: z.string(),
     }).parse(req.body);
-
     const user = await pg.getUserByEmail(email);
     if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
-
     const valid = await verifyPassword(password, user.hashedPassword);
     if (!valid) return res.status(401).json({ error: "Неверный email или пароль" });
-
     const token = signJwt(user.id);
     setCookieToken(res, token);
     res.json({ id: user.id, email: user.email, name: user.name });
@@ -98,15 +87,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  // Returns current user info if authenticated.
-  // When running without PG (MemStorage/demo mode), skip auth and return demo user.
-  // IMPORTANT: authMiddleware must NOT be applied when !pg, otherwise it returns
-  // 401 before we can check the pg condition, causing an infinite logout loop.
   app.get("/api/auth/me", async (req: AuthRequest, res) => {
-    if (!pg) {
-      return res.status(503).json({ error: "Database not configured. Running in demo mode." });
-    }
-    // PG mode — require valid JWT
+    if (!pg) return res.status(503).json({ error: "Database not configured. Running in demo mode." });
     const token = req.cookies?.["finwise_token"];
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     const payload = (await import("./auth")).verifyJwt(token);
@@ -135,15 +117,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(safe);
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // OPTIONAL AUTH GUARD: if PG is available → require auth; else allow all
-  // ────────────────────────────────────────────────────────────────────────
-
   const guard = pg ? authMiddleware : (_req: any, _res: any, next: any) => next();
 
-  // ────────────────────────────────────────────────────────────────────────
-  // ACCOUNTS
-  // ────────────────────────────────────────────────────────────────────────
+  // ── ACCOUNTS ──────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
@@ -151,9 +127,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const enriched = await Promise.all(
       accounts.map(async (acc) => ({
         ...acc,
-        balance: acc.type === "credit"
-          ? 0
-          : await pg.getAccountBalance(acc.id),
+        // Для кредитки возвращаем реальный баланс (сколько физически можно потратить)
+        balance: await pg.getAccountBalance(acc.id),
         debt: acc.type === "credit"
           ? await pg.getCreditDebt(acc.id)
           : undefined,
@@ -183,9 +158,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // TRANSACTIONS
-  // ────────────────────────────────────────────────────────────────────────
+  // ── TRANSACTIONS ──────────────────────────────────────────────────────────
 
   app.get("/api/transactions", guard, async (req: AuthRequest, res) => {
     if (pg) {
@@ -196,38 +169,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(txs);
   });
 
-  // ── ВАЖНО: этот роут должен быть выше /account/:accountId,
-  //    иначе Express примет "monthly-summary" за accountId ──────────────
   app.get("/api/transactions/monthly-summary", guard, async (req: AuthRequest, res) => {
-    // В mem-режиме (без БД) возвращаем пустой массив — безопасно
     if (!pg) return res.json([]);
-
     const userId = getUserId(req);
     const txs = await pg.getTransactions(userId);
-
-    // Группируем транзакции по месяцу ("YYYY-MM")
     const map: Record<string, { income: number; expense: number }> = {};
-
     for (const t of txs) {
-      // t.date — строка "YYYY-MM-DD"
-      const month = String(t.date).slice(0, 7); // "2026-03"
+      const month = String(t.date).slice(0, 7);
       if (!map[month]) map[month] = { income: 0, expense: 0 };
-      if (t.type === "income") {
-        map[month].income += Number(t.amount);
-      } else if (t.type === "expense") {
-        map[month].expense += Math.abs(Number(t.amount));
-      }
+      if (t.type === "income") map[month].income += Number(t.amount);
+      else if (t.type === "expense") map[month].expense += Math.abs(Number(t.amount));
     }
-
-    // Формируем отсортированный массив (от старых к новым)
     const result = Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, data]) => ({
-        month,                    // "2026-03"
-        income: data.income,
-        expense: data.expense,
-      }));
-
+      .map(([month, data]) => ({ month, income: data.income, expense: data.expense }));
     res.json(result);
   });
 
@@ -253,17 +208,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/transactions/:id", guard, async (req: AuthRequest, res) => {
-    if (pg) {
-      await pg.deleteTransaction(Number(req.params.id), getUserId(req));
-    } else {
-      await (mem as any).deleteTransaction(Number(req.params.id));
-    }
+    if (pg) await pg.deleteTransaction(Number(req.params.id), getUserId(req));
+    else await (mem as any).deleteTransaction(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // BUDGETS
-  // ────────────────────────────────────────────────────────────────────────
+  // ── BUDGETS ───────────────────────────────────────────────────────────────
 
   app.get("/api/budgets", guard, async (req: AuthRequest, res) => {
     if (pg) return res.json(await pg.getBudgets(getUserId(req)));
@@ -288,17 +238,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/budgets/:id", guard, async (req: AuthRequest, res) => {
-    if (pg) {
-      await pg.deleteBudget(Number(req.params.id), getUserId(req));
-    } else {
-      await (mem as any).deleteBudget(Number(req.params.id));
-    }
+    if (pg) await pg.deleteBudget(Number(req.params.id), getUserId(req));
+    else await (mem as any).deleteBudget(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // LESSONS (with per-user progress if PG available)
-  // ────────────────────────────────────────────────────────────────────────
+  // ── LESSONS ───────────────────────────────────────────────────────────────
 
   app.get("/api/lessons", guard, async (req: AuthRequest, res) => {
     if (pg) return res.json(await pg.getLessonsWithProgress(getUserId(req)));
@@ -310,18 +255,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(await (mem as any).completeLesson(Number(req.params.id)));
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // USER PROGRESS
-  // ────────────────────────────────────────────────────────────────────────
+  // ── USER PROGRESS ─────────────────────────────────────────────────────────
 
   app.get("/api/progress", guard, async (req: AuthRequest, res) => {
     if (pg) return res.json(await pg.getUserProgress(getUserId(req)));
     res.json(await (mem as any).getUserProgress());
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // SAVINGS GOALS
-  // ────────────────────────────────────────────────────────────────────────
+  // ── SAVINGS GOALS ─────────────────────────────────────────────────────────
 
   app.get("/api/goals", guard, async (req: AuthRequest, res) => {
     if (pg) return res.json(await pg.getSavingsGoals(getUserId(req)));
@@ -354,26 +295,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/goals/:id", guard, async (req: AuthRequest, res) => {
-    if (pg) {
-      await pg.deleteSavingsGoal(Number(req.params.id), getUserId(req));
-    } else {
-      await (mem as any).deleteSavingsGoal(Number(req.params.id));
-    }
+    if (pg) await pg.deleteSavingsGoal(Number(req.params.id), getUserId(req));
+    else await (mem as any).deleteSavingsGoal(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // CATEGORIES
-  // ────────────────────────────────────────────────────────────────────────
+  // ── CATEGORIES ────────────────────────────────────────────────────────────
 
   app.get("/api/categories", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
     res.json(await pg.getCategories(getUserId(req)));
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // NOTIFICATIONS
-  // ────────────────────────────────────────────────────────────────────────
+  // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
 
   app.get("/api/notifications", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
@@ -386,9 +320,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  // ────────────────────────────────────────────────────────────────────────
-  // QUICK-ADD
-  // ────────────────────────────────────────────────────────────────────────
+  // ── QUICK-ADD ─────────────────────────────────────────────────────────────
 
   app.get("/api/quick-add", (req, res) => {
     res.json({ ok: true, type: req.query.type ?? "expense" });

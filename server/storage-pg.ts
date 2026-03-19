@@ -183,10 +183,7 @@ const DEFAULT_CATEGORIES = [
 // ─── PG STORAGE CLASS ────────────────────────────────────────────────────────
 
 export class PgStorage {
-  // ── SEED ──────────────────────────────────────────────────────────────────
-
   async seedGlobalData() {
-    // Lessons
     const existingLessons = await db.select().from(S.lessons);
     if (existingLessons.length === 0) {
       for (const lesson of DEFAULT_LESSONS) {
@@ -196,7 +193,6 @@ export class PgStorage {
   }
 
   async seedUserData(userId: number) {
-    // Default categories for new user
     const existing = await db.select().from(S.categories)
       .where(and(eq(S.categories.userId, userId), eq(S.categories.isDefault, true)));
     if (existing.length === 0) {
@@ -204,7 +200,6 @@ export class PgStorage {
         await db.insert(S.categories).values({ ...cat, userId });
       }
     }
-    // User progress
     const progress = await db.select().from(S.userProgress).where(eq(S.userProgress.userId, userId));
     if (progress.length === 0) {
       await db.insert(S.userProgress).values({ userId, totalXp: 0, level: 1, streak: 0, lastActiveDate: today() });
@@ -275,7 +270,7 @@ export class PgStorage {
       .where(and(eq(S.accounts.id, id), eq(S.accounts.userId, userId)));
   }
 
-  /** Computes real-time balance = initialBalance + sum of all transactions */
+  /** Real-time balance = initialBalance + sum of all transactions */
   async getAccountBalance(accountId: number): Promise<number> {
     const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
     if (!acc) return 0;
@@ -284,7 +279,7 @@ export class PgStorage {
     return acc.initialBalance + delta;
   }
 
-  /** For credit card: debt = sum of creditPurchase - sum of creditPayment */
+  /** Credit debt = sum of creditPurchase - sum of creditPayment */
   async getCreditDebt(accountId: number): Promise<number> {
     const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
     if (!acc) return 0;
@@ -293,10 +288,8 @@ export class PgStorage {
     const txDelta = txs
       .filter(t => t.type === "creditPurchase" || t.type === "creditPayment")
       .reduce((sum, t) => sum + t.amount, 0);
-    // initialBalance = сколько уже потрачено на момент добавления карты
     return acc.initialBalance + txDelta;
   }
-
 
   // ── TRANSACTIONS ──────────────────────────────────────────────────────────
 
@@ -315,7 +308,6 @@ export class PgStorage {
   async addTransaction(userId: number, data: Omit<S.InsertTransaction, "userId">): Promise<S.Transaction> {
     const [tx] = await db.insert(S.transactions)
       .values({ ...data, userId, createdAt: now() }).returning();
-    // update streak
     await this._updateStreak(userId);
     return tx;
   }
@@ -365,53 +357,33 @@ export class PgStorage {
       .where(and(eq(S.savingsGoals.id, id), eq(S.savingsGoals.userId, userId)));
     if (!existing) throw new Error("Goal not found");
 
-    // If accountId provided — verify and create transaction
     if (accountId) {
       const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
       if (!acc) throw new Error("Счёт не найден");
 
-      if (acc.type === "credit") {
-        // Credit card: check available limit (creditLimit - debt)
-        const debt = await this.getCreditDebt(accountId);
-        const availableLimit = (acc.creditLimit ?? 0) - debt;
-        if (availableLimit < amount) {
-          throw new Error(`Недостаточно доступного лимита. Доступно: ${availableLimit.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
-        }
-        // Create creditPurchase transaction
-        await db.insert(S.transactions).values({
-          userId,
-          accountId,
-          title: `Пополнение цели: ${existing.title}`,
-          amount: amount, // positive for credit
-          currency: "RUB",
-          category: "Сбережения",
-          type: "creditPurchase",
-          date: today(),
-          note: `Перевод на цель #${id}`,
-          isPlanned: false,
-          createdAt: now(),
-        });
-      } else {
-        // Debit/cash/other: check real balance
-        const balance = await this.getAccountBalance(accountId);
-        if (balance < amount) {
-          throw new Error(`Недостаточно средств на счёте. Доступно: ${balance.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
-        }
-        // Create expense transaction
-        await db.insert(S.transactions).values({
-          userId,
-          accountId,
-          title: `Пополнение цели: ${existing.title}`,
-          amount: -amount, // negative for debit
-          currency: "RUB",
-          category: "Сбережения",
-          type: "expense",
-          date: today(),
-          note: `Перевод на цель #${id}`,
-          isPlanned: false,
-          createdAt: now(),
-        });
+      // Для любого типа счёта (включая кредитку) используем реальный баланс
+      // Кредитка: balance = initialBalance (пополненный пользователем) + транзакции
+      // Это именно те деньги, которыми пользователь физически располагает
+      const balance = await this.getAccountBalance(accountId);
+      if (balance < amount) {
+        throw new Error(`Недостаточно средств на счёте. Доступно: ${balance.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
       }
+
+      // Для кредитки тип транзакции — expense (списание с баланса)
+      // Для дебета/наличных — тоже expense
+      await db.insert(S.transactions).values({
+        userId,
+        accountId,
+        title: `Пополнение цели: ${existing.title}`,
+        amount: -amount,
+        currency: "RUB",
+        category: "Сбережения",
+        type: "expense",
+        date: today(),
+        note: `Перевод на цель #${id}`,
+        isPlanned: false,
+        createdAt: now(),
+      });
     }
 
     const newAmount = Math.min(existing.currentAmount + amount, existing.targetAmount);
@@ -435,7 +407,7 @@ export class PgStorage {
   }
 
   async addCategory(userId: number, data: Omit<S.InsertCategory, "userId">): Promise<S.Category> {
-    const [cat] = await db.insert(S.categories).values({ ...data, userId }).returning();
+    const [cat] = await db.insert(S.categories).values({ ...cat, userId }).returning();
     return cat;
   }
 
@@ -456,16 +428,12 @@ export class PgStorage {
   async completeLesson(lessonId: number, userId: number): Promise<S.Lesson & { completed: boolean }> {
     const [lesson] = await db.select().from(S.lessons).where(eq(S.lessons.id, lessonId));
     if (!lesson) throw new Error("Lesson not found");
-
     const existing = await db.select().from(S.completedLessons)
       .where(and(eq(S.completedLessons.lessonId, lessonId), eq(S.completedLessons.userId, userId)));
-
     if (existing.length === 0) {
-      await db.insert(S.completedLessons)
-        .values({ userId, lessonId, completedAt: now() });
+      await db.insert(S.completedLessons).values({ userId, lessonId, completedAt: now() });
       await this.addXp(userId, lesson.xpReward);
     }
-
     return { ...lesson, completed: true };
   }
 
@@ -528,7 +496,6 @@ export class PgStorage {
 
   // ── CRON HELPERS ──────────────────────────────────────────────────────────
 
-  /** Returns all users with their notification settings — used by cron scheduler */
   async getAllUsersForCron(): Promise<S.User[]> {
     return db.select().from(S.users);
   }
