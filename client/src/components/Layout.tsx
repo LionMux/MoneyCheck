@@ -9,7 +9,7 @@ import {
   Wallet, Bell, LogOut, Menu, X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import PerplexityAttribution from "@/components/PerplexityAttribution";
+
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 
@@ -141,7 +141,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <span className="dark:hidden">Светлая тема</span>
           <span className="hidden dark:block">Тёмная тема</span>
         </button>
-        <PerplexityAttribution />
+        
       </div>
     </>
   );
