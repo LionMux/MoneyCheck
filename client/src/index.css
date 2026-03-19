@@ -28,14 +28,16 @@
     --input: 220 13% 85%;
     --ring: 158 64% 32%;
     --radius: 0.625rem;
-    --sidebar: 220 25% 12%;
-    --sidebar-foreground: 220 10% 88%;
-    --sidebar-primary: 158 64% 45%;
+
+    /* Sidebar — светлая тема: белый фон, тёмный текст (как основной экран) */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 220 25% 8%;
+    --sidebar-primary: 158 64% 32%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 18%;
-    --sidebar-accent-foreground: 220 5% 97%;
-    --sidebar-border: 220 20% 18%;
-    --sidebar-ring: 158 64% 45%;
+    --sidebar-accent: 220 14% 94%;
+    --sidebar-accent-foreground: 220 25% 18%;
+    --sidebar-border: 220 13% 85%;
+    --sidebar-ring: 158 64% 32%;
 
     /* Custom tokens */
     --color-income: 158 64% 32%;
@@ -69,6 +71,8 @@
     --border: 220 20% 18%;
     --input: 220 20% 18%;
     --ring: 158 55% 45%;
+
+    /* Sidebar — тёмная тема: тёмный фон, светлый текст */
     --sidebar: 220 28% 6%;
     --sidebar-foreground: 220 10% 75%;
     --sidebar-primary: 158 55% 45%;
@@ -85,7 +89,9 @@
 }
 
 @layer base {
-  * { @apply border-border; }
+  * {
+    @apply border-border;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-body);
@@ -99,11 +105,13 @@
 }
 
 /* Number formatting */
-.tabular-nums { font-variant-numeric: tabular-nums lining-nums; }
+.tabular-nums {
+  font-variant-numeric: tabular-nums lining-nums;
+}
 
 /* Income / expense color helpers */
-.text-income { color: hsl(158 64% 28%); }
-.dark .text-income { color: hsl(158 55% 52%); }
+.text-income  { color: hsl(158 64% 28%); }
+.dark .text-income  { color: hsl(158 55% 52%); }
 .text-expense { color: hsl(0 72% 46%); }
 .dark .text-expense { color: hsl(0 65% 65%); }
 
@@ -116,11 +124,11 @@
 /* XP bar animation */
 @keyframes xpFill {
   from { width: 0; }
-  to { width: var(--xp-width); }
+  to   { width: var(--xp-width); }
 }
 
 /* Progress bar shimmer */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }
