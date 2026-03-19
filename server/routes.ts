@@ -341,9 +341,16 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.patch("/api/goals/:id/deposit", guard, async (req: AuthRequest, res) => {
-    const { amount } = z.object({ amount: z.number() }).parse(req.body);
-    if (pg) return res.json(await pg.updateSavingsGoalAmount(Number(req.params.id), getUserId(req), amount));
-    res.json(await (mem as any).updateSavingsGoal(Number(req.params.id), amount));
+    try {
+      const { amount, accountId } = z.object({
+        amount: z.number(),
+        accountId: z.number().nullable().optional(),
+      }).parse(req.body);
+      if (pg) return res.json(await pg.updateSavingsGoalAmount(Number(req.params.id), getUserId(req), amount, accountId ?? null));
+      res.json(await (mem as any).updateSavingsGoal(Number(req.params.id), amount));
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
   });
 
   app.delete("/api/goals/:id", guard, async (req: AuthRequest, res) => {
