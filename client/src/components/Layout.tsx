@@ -138,8 +138,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         >
           <Sun size={14} className="dark:hidden" />
           <Moon size={14} className="hidden dark:block" />
-          <span className="dark:hidden">Тёмная тема</span>
-          <span className="hidden dark:block">Светлая тема</span>
+          <span className="dark:hidden">Светлая тема</span>
+          <span className="hidden dark:block">Тёмная тема</span>
         </button>
         <PerplexityAttribution />
       </div>
