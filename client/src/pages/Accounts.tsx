@@ -201,7 +201,7 @@ function CreditCardDetail({ account }: { account: Account }) {
       <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
         Кредитная карта
       </div>
-      <div className="grid grid-cols-3 gap-2 text-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
         <div>
           <div className="text-muted-foreground text-xs">Долг</div>
           <div className={`font-bold ${debt > 0 ? "text-red-500" : "text-emerald-500"}`}>
