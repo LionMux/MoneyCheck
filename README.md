@@ -1,5 +1,7 @@
 # FinWise — Умные Финансы
 
+# testing push
+
 Полнофункциональное приложение для управления личными финансами с модулем финансовой грамотности.
 
 ## Возможности
@@ -18,7 +20,7 @@
 ## Технологии
 
 | Слой | Технология |
-|------|-----------|
+|------|-----------| 
 | Frontend | React 18 + TypeScript + Vite + Tailwind CSS v3 + shadcn/ui |
 | Backend | Express 5 + TypeScript + tsx |
 | ORM | Drizzle ORM + drizzle-zod |
