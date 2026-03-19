@@ -360,30 +360,58 @@ export class PgStorage {
     return g;
   }
 
-  async updateSavingsGoalAmount(id: number, userId: number, amount: number): Promise<S.SavingsGoal> {
+  async updateSavingsGoalAmount(id: number, userId: number, amount: number, accountId: number | null = null): Promise<S.SavingsGoal> {
     const [existing] = await db.select().from(S.savingsGoals)
       .where(and(eq(S.savingsGoals.id, id), eq(S.savingsGoals.userId, userId)));
     if (!existing) throw new Error("Goal not found");
 
-    // If goal is linked to an account — check balance and create expense transaction
-    if (existing.accountId) {
-      const balance = await this.getAccountBalance(existing.accountId);
-      if (balance < amount) {
-        throw new Error(`Недостаточно средств на счёте. Доступно: ${balance.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
+    // If accountId provided — verify and create transaction
+    if (accountId) {
+      const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
+      if (!acc) throw new Error("Счёт не найден");
+
+      if (acc.type === "credit") {
+        // Credit card: check available limit (creditLimit - debt)
+        const debt = await this.getCreditDebt(accountId);
+        const availableLimit = (acc.creditLimit ?? 0) - debt;
+        if (availableLimit < amount) {
+          throw new Error(`Недостаточно доступного лимита. Доступно: ${availableLimit.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
+        }
+        // Create creditPurchase transaction
+        await db.insert(S.transactions).values({
+          userId,
+          accountId,
+          title: `Пополнение цели: ${existing.title}`,
+          amount: amount, // positive for credit
+          currency: "RUB",
+          category: "Сбережения",
+          type: "creditPurchase",
+          date: today(),
+          note: `Перевод на цель #${id}`,
+          isPlanned: false,
+          createdAt: now(),
+        });
+      } else {
+        // Debit/cash/other: check real balance
+        const balance = await this.getAccountBalance(accountId);
+        if (balance < amount) {
+          throw new Error(`Недостаточно средств на счёте. Доступно: ${balance.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
+        }
+        // Create expense transaction
+        await db.insert(S.transactions).values({
+          userId,
+          accountId,
+          title: `Пополнение цели: ${existing.title}`,
+          amount: -amount, // negative for debit
+          currency: "RUB",
+          category: "Сбережения",
+          type: "expense",
+          date: today(),
+          note: `Перевод на цель #${id}`,
+          isPlanned: false,
+          createdAt: now(),
+        });
       }
-      await db.insert(S.transactions).values({
-        userId,
-        accountId: existing.accountId,
-        title: `Пополнение цели: ${existing.title}`,
-        amount: -amount,
-        currency: "RUB",
-        category: "Сбережения",
-        type: "expense",
-        date: today(),
-        note: `Перевод на цель #${id}`,
-        isPlanned: false,
-        createdAt: now(),
-      });
     }
 
     const newAmount = Math.min(existing.currentAmount + amount, existing.targetAmount);
