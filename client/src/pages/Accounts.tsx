@@ -191,7 +191,7 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
 
 function CreditCardDetail({ account }: { account: Account }) {
   const limit = account.creditLimit ? parseFloat(String(account.creditLimit)) : null;
-  const remaining = parseFloat(String(account.initialBalance ?? 0));
+  const remaining = parseFloat(String((account as any).balance ?? account.initialBalance ?? 0));
   const debt = limit !== null ? Math.max(limit - remaining, 0) : 0;
   const available = limit !== null ? remaining : null;
   const usedPct = limit ? Math.min((debt / limit) * 100, 100) : 0;
@@ -339,7 +339,7 @@ function AccountsSummary({ accounts }: { accounts: Account[] }) {
     .filter(a => a.type === "credit")
     .reduce((s, a) => {
       const limit = a.creditLimit ? parseFloat(String(a.creditLimit)) : 0;
-      const remaining = parseFloat(String(a.initialBalance ?? 0));
+      const remaining = parseFloat(String((a as any).balance ?? a.initialBalance ?? 0));
       return s + Math.max(limit - remaining, 0);
     }, 0);
 
