@@ -86,14 +86,11 @@ export default function Transactions() {
       return;
     }
     const resolvedType = resolveType(form.type as "income" | "expense", selectedAccount);
-    // Для creditPurchase — сумма положительная (долг растёт);
-    // для creditPayment — отрицательная (долг уменьшается)
+    // creditPurchase — отрицательная (баланс уменьшается, долг растёт)    // для creditPayment — отрицательная (долг уменьшается)
     let amount: number;
     if (resolvedType === "creditPurchase") {
-      amount = Math.abs(Number(form.amount));
-    } else if (resolvedType === "creditPayment") {
-      amount = -Math.abs(Number(form.amount));
-    } else if (form.type === "expense") {
+      amount = -Math.abs(Number(form.amount));    } else if (resolvedType === "creditPayment") {
+      amount = Math.abs(Number(form.amount));    } else if (form.type === "expense") {
       amount = -Math.abs(Number(form.amount));
     } else {
       amount = Math.abs(Number(form.amount));
