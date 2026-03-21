@@ -96,8 +96,8 @@ export default function Dashboard() {
     .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
 
   const monthTxs = transactions.filter(t => t.date.startsWith(currentDisplayMonth));
-  const income   = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expense  = monthTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const income   = monthTxs.filter(t => t.type === "income" || t.type === "creditPayment").reduce((s, t) => s + t.amount, 0);
+  const expense  = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
 
   const monthLabel    = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
   const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
@@ -108,14 +108,14 @@ export default function Dashboard() {
     const dayTxs = transactions.filter(t => t.date === dateStr);
     return {
       day:     format(d, "EEEEEE", { locale: ru }),
-      income:  dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
-      expense: dayTxs.filter(t => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0),
+      income:  dayTxs.filter(t => t.type === "income" || t.type === "creditPayment").reduce((s, t) => s + t.amount, 0),
+      expense: dayTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0),
     };
   });
 
   const catData = Object.entries(
     transactions
-      .filter(t => t.type === "expense")
+      .filter(t => t.type === "expense" || t.type === "creditPurchase")
       .reduce((acc, t) => {
         acc[t.category] = (acc[t.category] || 0) + Math.abs(t.amount);
         return acc;
@@ -176,7 +176,7 @@ export default function Dashboard() {
               </div>
               <p className="text-xl font-bold tabular-nums text-income">{fmt(income)}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {monthLabelCap} · {monthTxs.filter(t => t.type === "income").length} операций
+                {monthLabelCap} · {monthTxs.filter(t => t.type === "income" || t.type === "creditPayment").length} операций
               </p>
             </CardContent>
           </Card>
@@ -189,7 +189,7 @@ export default function Dashboard() {
               </div>
               <p className="text-xl font-bold tabular-nums text-expense">{fmt(expense)}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {monthLabelCap} · {monthTxs.filter(t => t.type === "expense").length} операций
+                {monthLabelCap} · {monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").length} операций
               </p>
             </CardContent>
           </Card>
@@ -327,8 +327,8 @@ export default function Dashboard() {
                     <p className="text-sm font-medium leading-none">{tx.title}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{tx.category}</p>
                   </div>
-                  <span className={cn("text-sm font-semibold tabular-nums", tx.type === "income" ? "text-income" : "text-expense")}>
-                    {tx.type === "income" ? "+" : ""}{fmt(Math.abs(tx.amount))}
+                  <span className={cn("text-sm font-semibold tabular-nums", (tx.type === "income" || tx.type === "creditPayment") ? "text-income" : "text-expense")}>
+                    {(tx.type === "income" || tx.type === "creditPayment") ? "+" : ""}{fmt(Math.abs(tx.amount))}
                   </span>
                 </div>
               ))}
