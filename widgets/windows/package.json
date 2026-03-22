@@ -1,11 +1,15 @@
 {
-  "name": "finwise-windows-widget",
+  "name": "moneycheck-windows-widget",
   "version": "1.1.0",
-  "description": "FinWise desktop widget for Windows",
+  "description": "MoneyCheck desktop widget for Windows",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LionMux/MoneyCheck.git"
+  },
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win --x64"
+    "build": "electron-builder --win --x64 --publish never"
   },
   "dependencies": {
     "electron-store": "^8.2.0"
@@ -15,12 +19,11 @@
     "electron-builder": "^24.0.0"
   },
   "build": {
-    "appId": "com.finwise.widget",
-    "productName": "FinWise Widget",
+    "appId": "com.moneycheck.widget",
+    "productName": "MoneyCheck Widget",
     "asar": true,
     "win": {
-      "target": "nsis",
-      "icon": "../../client/public/icon-512.png"
+      "target": "nsis"
     },
     "nsis": {
       "oneClick": true,
