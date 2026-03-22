@@ -4,3 +4,25 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Electron build artifacts
+widgets/windows/out/
+widgets/windows/dist/
+widgets/windows/*.exe
+widgets/windows/*.dmg
+widgets/windows/*.AppImage
+widgets/windows/*.snap
+widgets/windows/*.deb
+widgets/windows/*.rpm
+widgets/windows/*.zip
+widgets/windows/*.blockmap
+widgets/windows/build/
+
+# Electron dev
+widgets/windows/.webpack/
+widgets/windows/.vite/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
