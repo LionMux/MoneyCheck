@@ -326,5 +326,74 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true, type: req.query.type ?? "expense" });
   });
 
+    // ── WIDGET SUMMARY ──────────────────────────────────────────────────────
+  // GET /api/widget/summary
+  // Auth: JWT cookie (если есть) — иначе fallback demo-данные
+  // Используется Electron-виджетом для отображения баланса
+  app.get("/api/widget/summary", async (req: AuthRequest, res) => {
+    // Demo-mode: нет БД
+    if (!pg) {
+      return res.json({
+        totalBalance: 0,
+        monthIncome: 0,
+        monthExpense: 0,
+        streak: 0,
+        level: 1,
+        totalXp: 0,
+        demo: true,
+      });
+    }
+
+    // Попытка авторизации через JWT-cookie (необязательно для локальной машины)
+    let userId: number | null = null;
+    const token = (req as any).cookies?.["finwise_token"];
+    if (token) {
+      const { verifyJwt } = await import("./auth");
+      const payload = verifyJwt(token);
+      if (payload) userId = payload.sub;
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized. Please login via FinWise web app first." });
+    }
+
+    try {
+      // Получаем все счета пользователя и суммируем балансы
+      const accounts = await pg.getAccounts(userId);
+      let totalBalance = 0;
+      for (const acc of accounts) {
+        totalBalance += await pg.getAccountBalance(acc.id);
+      }
+
+      // Транзакции за текущий месяц
+      const allTxs = await pg.getTransactions(userId);
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const monthTxs = allTxs.filter(t => String(t.date).slice(0, 7) === currentMonth);
+
+      let monthIncome = 0;
+      let monthExpense = 0;
+      for (const t of monthTxs) {
+        if (t.type === "income") monthIncome += Number(t.amount);
+        else if (t.type === "expense") monthExpense += Math.abs(Number(t.amount));
+      }
+
+      // Прогресс пользователя (streak, level, xp)
+      const progress = await pg.getUserProgress(userId);
+
+      return res.json({
+        totalBalance: Math.round(totalBalance),
+        monthIncome: Math.round(monthIncome),
+        monthExpense: Math.round(monthExpense),
+        streak: progress.streak,
+        level: progress.level,
+        totalXp: progress.totalXp,
+      });
+    } catch (err: any) {
+      console.error("[widget/summary] Error:", err.message);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   return httpServer;
 }
