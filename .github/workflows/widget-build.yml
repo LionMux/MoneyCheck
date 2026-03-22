@@ -1,0 +1,73 @@
+name: Build Windows Widget
+
+on:
+  push:
+    paths:
+      - 'widgets/windows/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'widgets/windows/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: widgets/windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: widgets/windows/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Electron app (Windows)
+        run: npm run build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyCheck-Widget-Windows
+          path: |
+            widgets/windows/out/**/*.exe
+            widgets/windows/dist/**/*.exe
+          if-no-files-found: warn
+          retention-days: 30
+
+  lint:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: widgets/windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: widgets/windows/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for syntax errors
+        run: node --check main.js preload.js || true
