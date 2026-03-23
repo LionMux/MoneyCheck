@@ -118,7 +118,7 @@ function fetchJson(urlStr, options = {}) {
   return new Promise((resolve, reject) => {
     const mod = urlStr.startsWith("https") ? https : http;
     const headers = { "Accept": "application/json", ...options.headers };
-    const req = mod.get(urlStr, { headers }, (res) => {
+    const req = mod.get(urlStr, { { headers, rejectUnauthorized: false } }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
@@ -151,6 +151,7 @@ function postJson(urlStr, body) {
         "Accept": "application/json",
         "Content-Length": Buffer.byteLength(data),
       },
+              rejectUnauthorized: false,
     };
     const req = mod.request(options, (res) => {
       let resp = "";
