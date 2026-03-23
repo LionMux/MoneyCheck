@@ -276,6 +276,20 @@
   
   <button class="btn-primary" id="btn-save-settings">Сохранить</button>
   <button class="btn-secondary" id="btn-logout">Выйти из аккаунта</button>
+
+    <!-- Updates Section -->
+    <div style="border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px;">
+          <div style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">Версия приложения: <span id="app-version">...</span></div>
+          <button class="btn-secondary" id="btn-check-updates">Проверить обновления</button>
+          <div class="login-error hidden" id="update-status" style="margin-top: 8px;"></div>
+          <div class="hidden" id="update-progress" style="margin-top: 8px;">
+                  <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">Загрузка обновления: <span id="progress-percent">0%</span></div>
+                  <div style="background: rgba(255,255,255,0.1); border-radius: 4px; height: 6px; overflow: hidden;">
+                            <div id="progress-bar" style="background: var(--accent); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                          </div>
+                </div>
+          <button class="btn-primary hidden" id="btn-install-update">Установить и перезапустить</button>
+        </div>
 </div>
 </div>
 
@@ -451,6 +465,60 @@
       document.getElementById('content').innerHTML = '<div class="loading">Обновляем...</div>';
       fw.refresh();
     }, 800);
+
+      // ── Updates handlers ─────────────────────────────────────────────────────────
+      // Load and display app version
+      (async () => {
+            const versionResult = await fw.getAppVersion();
+            if (versionResult && versionResult.version) {
+                    document.getElementById('app-version').textContent = versionResult.version;
+                  }
+          })();
+
+      // Check for updates button
+      document.getElementById('btn-check-updates').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-check-updates');
+            const statusEl = document.getElementById('update-status');
+            btn.textContent = 'Проверяем...';
+            btn.disabled = true;
+            statusEl.classList.add('hidden');
+
+            const result = await fw.checkForUpdates();
+            btn.textContent = 'Проверить обновления';
+            btn.disabled = false;
+
+            if (result && !result.ok) {
+                    showStatus('update-status', result.error || 'Ошибка при проверке', true);
+                  }
+          });
+
+      // Install update button
+      document.getElementById('btn-install-update').addEventListener('click', async () => {
+            await fw.installUpdate();
+          });
+
+      // Update events from main process
+      fw.onUpdateAvailable((info) => {
+            showStatus('update-status', `↑ Доступно обновление ${info.version}. Загрузка...`, false);
+          });
+
+      fw.onUpdateDownloadProgress((progress) => {
+            const pct = Math.round(progress.percent || 0);
+            document.getElementById('progress-percent').textContent = pct + '%';
+            document.getElementById('progress-bar').style.width = pct + '%';
+            document.getElementById('update-progress').classList.remove('hidden');
+          });
+
+      fw.onUpdateDownloaded((info) => {
+            document.getElementById('update-progress').classList.add('hidden');
+            document.getElementById('btn-install-update').classList.remove('hidden');
+            showStatus('update-status', `✓ Обновление ${info.version} загружено. Готово к установке.`, false);
+          });
+
+      fw.onUpdateError((error) => {
+            document.getElementById('update-progress').classList.add('hidden');
+            showStatus('update-status', '✗ ' + (error || 'Ошибка обновления'), true);
+          });
   });
 
   document.getElementById('btn-logout').addEventListener('click', async () => {
