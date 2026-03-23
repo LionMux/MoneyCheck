@@ -1,6 +1,6 @@
 {
   "name": "moneycheck-windows-widget",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "MoneyCheck desktop widget for Windows",
   "main": "main.js",
   "repository": {
@@ -12,7 +12,9 @@
     "build": "electron-builder --win --x64 --publish never"
   },
   "dependencies": {
-    "electron-store": "^8.2.0"
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.1.7",
+    "electron-log": "^5.0.3"
   },
   "devDependencies": {
     "electron": "^28.0.0",
@@ -22,8 +24,16 @@
     "appId": "com.moneycheck.widget",
     "productName": "MoneyCheck Widget",
     "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "LionMux",
+        "repo": "MoneyCheck"
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "publisherName": "MoneyCheck"
     },
     "nsis": {
       "oneClick": true,
