@@ -16,11 +16,6 @@ import AuthPage from "@/pages/Auth";
 import NotFound from "@/pages/not-found";
 import WidgetAuthPage from "@/pages/WidgetAuth";
 
-/**
- * Full-screen spinner shown during account switches.
- * While this is rendered, NO page components are mounted,
- * so they cannot fire API queries with stale identity.
- */
 function SwitchingSpinner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
@@ -32,46 +27,41 @@ function SwitchingSpinner() {
 function AppRouter() {
   const { user, loading, switching, isDemo } = useAuth();
 
-  // Waiting for initial /api/auth/me response
   if (loading) return <SwitchingSpinner />;
-
-  // Transitioning between accounts — hard block on any page rendering
   if (switching) return <SwitchingSpinner />;
 
-  // Not authenticated and not in demo mode — show login/register
-  if (!isDemo && !user) return <AuthPage />;
-
-  /**
-   * KEY ISOLATION:
-   * key={user?.id ?? 'guest'} forces React to fully unmount and remount
-   * the entire page tree whenever the logged-in user changes.
-   * This is the nuclear option — guaranteed zero stale component state.
-   */
   return (
-    <Layout key={user?.id ?? "guest"}>
-      <Switch>
-        <Route path="/"              component={Dashboard} />
-        <Route path="/transactions"  component={Transactions} />
-        <Route path="/accounts"      component={AccountsPage} />
-        <Route path="/budget"        component={Budget} />
-        <Route path="/goals"         component={Goals} />
-        <Route path="/learn"         component={Learn} />
-        <Route path="/notifications" component={NotificationsPage} />
-        <Route path="/widget-auth"   component={WidgetAuthPage} />
-        <Route component={NotFound} />
-      </Switch>
-    </Layout>
+    <Switch>
+      {/* Публичный роут — без auth guard и без Layout */}
+      <Route path="/widget-auth" component={WidgetAuthPage} />
+
+      {/* Остальные роуты — требуют авторизации */}
+      <Route>
+        {() => {
+          if (!isDemo && !user) return <AuthPage />;
+          return (
+            <Layout key={user?.id ?? "guest"}>
+              <Switch>
+                <Route path="/"              component={Dashboard} />
+                <Route path="/transactions"  component={Transactions} />
+                <Route path="/accounts"      component={AccountsPage} />
+                <Route path="/budget"        component={Budget} />
+                <Route path="/goals"         component={Goals} />
+                <Route path="/learn"         component={Learn} />
+                <Route path="/notifications" component={NotificationsPage} />
+                <Route component={NotFound} />
+              </Switch>
+            </Layout>
+          );
+        }}
+      </Route>
+    </Switch>
   );
 }
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      {/*
-        Single Router for the whole app.
-        AuthProvider lives inside so useHashLocation() in AuthContext
-        and in AppRouter share the same routing context.
-      */}
       <Router hook={useHashLocation}>
         <AuthProvider>
           <AppRouter />
