@@ -1,6 +1,6 @@
 {
   "name": "moneycheck-windows-widget",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "MoneyCheck desktop widget for Windows",
   "main": "main.js",
   "repository": {
