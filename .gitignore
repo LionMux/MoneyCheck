@@ -26,3 +26,12 @@ widgets/windows/.vite/
 logs/
 *.log
 npm-debug.log*
+
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Misc
+__dummy__
