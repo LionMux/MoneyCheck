@@ -326,7 +326,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true, type: req.query.type ?? "expense" });
   });
 
-    // ── WIDGET SUMMARY ──────────────────────────────────────────────────────
+  // ── WIDGET SUMMARY ──────────────────────────────────────────────────────
   // GET /api/widget/summary
   // Auth: JWT cookie (если есть) — иначе fallback demo-данные
   // Используется Electron-виджетом для отображения баланса
@@ -344,9 +344,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       });
     }
 
-    // Попытка авторизации через JWT-cookie (необязательно для локальной машины)
+    // Попытка авторизации через JWT-cookie или Bearer-токен
     let userId: number | null = null;
-    const token = (req as any).cookies?.["finwise_token"];
+    const token =
+      (req as any).cookies?.["finwise_token"] ??
+      (req.headers.authorization?.replace("Bearer ", "") || null);
     if (token) {
       const { verifyJwt } = await import("./auth");
       const payload = verifyJwt(token);
@@ -393,6 +395,38 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       console.error("[widget/summary] Error:", err.message);
       return res.status(500).json({ error: "Internal server error" });
     }
+  });
+
+  // ── WIDGET AUTH (OAuth-like flow для Scriptable iOS) ──────────────────────
+  // Шаг 1: пользователь авторизован в браузере → POST /api/widget/auth/issue
+  //        сервер генерирует одноразовый code (TTL 5 минут)
+  // Шаг 2: Scriptable делает POST /api/widget/auth/exchange с этим code
+  //        и получает долгосрочный Bearer-токен (30 дней)
+
+  const widgetCodes = new Map<string, { userId: number; expires: number }>();
+
+  app.post("/api/widget/auth/issue", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    const userId = getUserId(req);
+    const { randomBytes } = await import("crypto");
+    const code = randomBytes(32).toString("hex");
+    // Код живёт 5 минут
+    widgetCodes.set(code, { userId, expires: Date.now() + 5 * 60 * 1000 });
+    res.json({ code });
+  });
+
+  app.post("/api/widget/auth/exchange", async (req, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    const { code } = z.object({ code: z.string() }).parse(req.body);
+    const entry = widgetCodes.get(code);
+    if (!entry || entry.expires < Date.now()) {
+      widgetCodes.delete(code);
+      return res.status(401).json({ error: "Код недействителен или истёк" });
+    }
+    widgetCodes.delete(code); // одноразовый — сразу удаляем
+    // Выдаём Bearer-токен на 30 дней для Scriptable
+    const token = signJwt(entry.userId, 60 * 60 * 24 * 30);
+    res.json({ token });
   });
 
   return httpServer;
