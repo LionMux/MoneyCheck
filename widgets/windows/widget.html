@@ -520,8 +520,7 @@
             document.getElementById('update-progress').classList.add('hidden');
             showStatus('update-status', '✗ ' + (error || 'Ошибка обновления'), true);
           });
-  });
-
+  
   document.getElementById('btn-logout').addEventListener('click', async () => {
     await fw.logout();
     showStatus('settings-status', '✓ Вы вышли из аккаунта', false);
