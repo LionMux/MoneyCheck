@@ -24,6 +24,19 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true, creat
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
+// ─── WIDGET AUTH CODES ───────────────────────────────────────────────────────
+
+export const widgetAuthCodes = pgTable("widget_auth_codes", {
+  id:        serial("id").primaryKey(),
+  code:      text("code").notNull().unique(),
+  userId:    integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+  usedAt:    text("used_at"),
+});
+
+export type WidgetAuthCode = typeof widgetAuthCodes.$inferSelect;
+
+
 // ─── ACCOUNTS (debit / credit / cash / other) ──────────────────────────────
 
 export const accounts = pgTable("accounts", {

@@ -493,6 +493,27 @@ export class PgStorage {
       .set({ isRead: true })
       .where(and(eq(S.notificationLog.id, id), eq(S.notificationLog.userId, userId)));
   }
+  // ── WIDGET AUTH CODES ─────────────────────────────────────────────────────
+
+  async createWidgetCode(userId: number, code: string, expiresAt: string): Promise<void> {
+    await db.insert(S.widgetAuthCodes).values({ code, userId, expiresAt });
+  }
+
+  async consumeWidgetCode(code: string): Promise<number | null> {
+    const [entry] = await db.select().from(S.widgetAuthCodes)
+      .where(eq(S.widgetAuthCodes.code, code));
+    if (!entry) return null;
+    if (entry.usedAt) return null; // уже использован
+    const now = new Date();
+    const expires = new Date(entry.expiresAt);
+    if (now > expires) {
+      await db.delete(S.widgetAuthCodes).where(eq(S.widgetAuthCodes.code, code));
+      return null;
+    }
+    // Помечаем как использованный и удаляем
+    await db.delete(S.widgetAuthCodes).where(eq(S.widgetAuthCodes.code, code));
+    return entry.userId;
+  }
 
   // ── CRON HELPERS ──────────────────────────────────────────────────────────
 

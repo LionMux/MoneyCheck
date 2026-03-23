@@ -399,35 +399,33 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ── WIDGET AUTH (OAuth-like flow для Scriptable iOS) ──────────────────────
   // Шаг 1: пользователь авторизован в браузере → POST /api/widget/auth/issue
-  //        сервер генерирует одноразовый code (TTL 5 минут)
+  //        сервер сохраняет одноразовый code в БД (TTL 5 минут)
   // Шаг 2: Scriptable делает POST /api/widget/auth/exchange с этим code
   //        и получает долгосрочный Bearer-токен (30 дней)
-
-  const widgetCodes = new Map<string, { userId: number; expires: number }>();
 
   app.post("/api/widget/auth/issue", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     const userId = getUserId(req);
     const { randomBytes } = await import("crypto");
     const code = randomBytes(32).toString("hex");
-    // Код живёт 5 минут
-    widgetCodes.set(code, { userId, expires: Date.now() + 5 * 60 * 1000 });
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    await pg.createWidgetCode(userId, code, expiresAt);
     res.json({ code });
   });
 
   app.post("/api/widget/auth/exchange", async (req, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
-    const { code } = z.object({ code: z.string() }).parse(req.body);
-    const entry = widgetCodes.get(code);
-    if (!entry || entry.expires < Date.now()) {
-      widgetCodes.delete(code);
-      return res.status(401).json({ error: "Код недействителен или истёк" });
+    try {
+      const { code } = z.object({ code: z.string() }).parse(req.body);
+      const userId = await pg.consumeWidgetCode(code);
+      if (!userId) {
+        return res.status(401).json({ error: "Код недействителен или истёк" });
+      }
+      const token = signJwt(userId, 60 * 60 * 24 * 30);
+      res.json({ token });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
     }
-    widgetCodes.delete(code); // одноразовый — сразу удаляем
-    // Выдаём Bearer-токен на 30 дней для Scriptable
-    const token = signJwt(entry.userId, 60 * 60 * 24 * 30);
-    res.json({ token });
   });
 
-  return httpServer;
 }
