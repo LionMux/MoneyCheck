@@ -127,7 +127,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const enriched = await Promise.all(
       accounts.map(async (acc) => ({
         ...acc,
-        // Для кредитки возвращаем реальный баланс (сколько физически можно потратить)
         balance: await pg.getAccountBalance(acc.id),
         debt: acc.type === "credit"
           ? await pg.getCreditDebt(acc.id)
@@ -326,12 +325,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true, type: req.query.type ?? "expense" });
   });
 
-  // ── WIDGET SUMMARY ──────────────────────────────────────────────────────
+  // ── WIDGET SUMMARY ────────────────────────────────────────────────────────
   // GET /api/widget/summary
-  // Auth: JWT cookie (если есть) — иначе fallback demo-данные
-  // Используется Electron-виджетом для отображения баланса
+  // - totalBalance: только НЕ-кредитные счета (debit, cash, savings)
+  // - monthIncome/monthExpense: только type=income/expense (без creditPurchase/creditPayment)
   app.get("/api/widget/summary", async (req: AuthRequest, res) => {
-    // Demo-mode: нет БД
     if (!pg) {
       return res.json({
         totalBalance: 0,
@@ -344,7 +342,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       });
     }
 
-    // Попытка авторизации через JWT-cookie или Bearer-токен
     let userId: number | null = null;
     const token =
       (req as any).cookies?.["finwise_token"] ??
@@ -360,14 +357,17 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
 
     try {
-      // Получаем все счета пользователя и суммируем балансы
       const accounts = await pg.getAccounts(userId);
+
+      // Суммируем баланс только не-кредитных счетов
       let totalBalance = 0;
       for (const acc of accounts) {
-        totalBalance += await pg.getAccountBalance(acc.id);
+        if (acc.type !== "credit") {
+          totalBalance += await pg.getAccountBalance(acc.id);
+        }
       }
 
-      // Транзакции за текущий месяц
+      // Транзакции за текущий месяц — только income/expense (без кредитных операций)
       const allTxs = await pg.getTransactions(userId);
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -378,9 +378,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       for (const t of monthTxs) {
         if (t.type === "income") monthIncome += Number(t.amount);
         else if (t.type === "expense") monthExpense += Math.abs(Number(t.amount));
+        // creditPurchase и creditPayment намеренно пропускаем
       }
 
-      // Прогресс пользователя (streak, level, xp)
       const progress = await pg.getUserProgress(userId);
 
       return res.json({
@@ -398,10 +398,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── WIDGET AUTH (OAuth-like flow для Scriptable iOS) ──────────────────────
-  // Шаг 1: пользователь авторизован в браузере → POST /api/widget/auth/issue
-  //        сервер сохраняет одноразовый code в БД (TTL 5 минут)
-  // Шаг 2: Scriptable делает POST /api/widget/auth/exchange с этим code
-  //        и получает долгосрочный Bearer-токен (30 дней)
 
   app.post("/api/widget/auth/issue", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
