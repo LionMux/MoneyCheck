@@ -118,7 +118,7 @@ function fetchJson(urlStr, options = {}) {
   return new Promise((resolve, reject) => {
     const mod = urlStr.startsWith("https") ? https : http;
     const headers = { "Accept": "application/json", ...options.headers };
-    const req = mod.get(urlStr, { { headers, rejectUnauthorized: false } }, (res) => {
+    const req = mod.get(urlStr, { headers, rejectUnauthorized: false }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
