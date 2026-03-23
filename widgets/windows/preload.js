@@ -38,4 +38,15 @@ contextBridge.exposeInMainWorld("finwiseWidget", {
   login: ({ email, password }) => ipcRenderer.invoke("do-login", { email, password }),
   /** Logout: clear stored token */
   logout: () => ipcRenderer.invoke("do-logout"),
+
+    // Updates (renderer -> main)
+    checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+    installUpdate: () => ipcRenderer.invoke("install-update"),
+    getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+
+    // Update events (main -> renderer)
+    onUpdateAvailable: (cb) => ipcRenderer.on("update-available", (_event, info) => cb(info)),
+    onUpdateDownloadProgress: (cb) => ipcRenderer.on("update-download-progress", (_event, progress) => cb(progress)),
+    onUpdateDownloaded: (cb) => ipcRenderer.on("update-downloaded", (_event, info) => cb(info)),
+    onUpdateError: (cb) => ipcRenderer.on("update-error", (_event, error) => cb(error)),
 });
