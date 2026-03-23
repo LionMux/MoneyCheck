@@ -14,6 +14,7 @@ import AccountsPage from "@/pages/Accounts";
 import NotificationsPage from "@/pages/Notifications";
 import AuthPage from "@/pages/Auth";
 import NotFound from "@/pages/not-found";
+import WidgetAuthPage from "@/pages/WidgetAuth";
 
 /**
  * Full-screen spinner shown during account switches.
@@ -56,6 +57,7 @@ function AppRouter() {
         <Route path="/goals"         component={Goals} />
         <Route path="/learn"         component={Learn} />
         <Route path="/notifications" component={NotificationsPage} />
+        <Route path="/widget-auth"   component={WidgetAuthPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
