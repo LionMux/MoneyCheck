@@ -22,8 +22,56 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = 
 const path = require("path");
 const https = require("https");
 const http = require("http");
+const { autoUpdater } = require("electron-updater");
+const log = require("electron-log");
 
 const DEFAULT_BACKEND = "https://myfinwise.duckdns.org";
+
+// ── Auto-updater setup ────────────────────────────────────────────────────────
+log.transports.file.level = "info";
+autoUpdater.logger = log;
+
+// Only enable auto-update in packaged app
+if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
+
+// Auto-updater events
+autoUpdater.on("checking-for-update", () => {
+    log.info("Checking for update...");
+  });
+
+autoUpdater.on("update-available", (info) => {
+    log.info("Update available:", info);
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+          widgetWindow.webContents.send("update-available", info);
+        }
+  });
+
+autoUpdater.on("update-not-available", (info) => {
+    log.info("Update not available:", info);
+  });
+
+autoUpdater.on("error", (err) => {
+    log.error("Error in auto-updater:", err);
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+          widgetWindow.webContents.send("update-error", err.message);
+        }
+  });
+
+autoUpdater.on("download-progress", (progress) => {
+    log.info(`Download speed: ${progress.bytesPerSecond} - Downloaded ${progress.percent}%`);
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+          widgetWindow.webContents.send("update-download-progress", progress);
+        }
+  });
+
+autoUpdater.on("update-downloaded", (info) => {
+    log.info("Update downloaded:", info);
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+          widgetWindow.webContents.send("update-downloaded", info);
+        }
+  });
 
 // ── Config store (electron-store) ────────────────────────────────────────────
 let store = null;
@@ -267,6 +315,37 @@ ipcMain.handle("set-appearance", (_, { bgColor, bgOpacity, fullyTransparent }) =
   }
   return { ok: true };
 });
+
+// Update-related IPC handlers
+ipcMain.handle("check-for-updates", async () => {
+    if (!app.isPackaged) {
+          return { ok: false, error: "Updates only available in packaged app" };
+        }
+    try {
+          const result = await autoUpdater.checkForUpdates();
+          return { ok: true, updateInfo: result?.updateInfo };
+        } catch (err) {
+          log.error("Check for updates failed:", err);
+          return { ok: false, error: err.message };
+        }
+  });
+
+ipcMain.handle("install-update", () => {
+    if (!app.isPackaged) {
+          return { ok: false, error: "Updates only available in packaged app" };
+        }
+    try {
+          autoUpdater.quitAndInstall();
+          return { ok: true };
+        } catch (err) {
+          log.error("Install update failed:", err);
+          return { ok: false, error: err.message };
+        }
+  });
+
+ipcMain.handle("get-app-version", () => {
+    return { version: app.getVersion() };
+  });
 
 ipcMain.handle("do-login", async (_, { email, password }) => {
   const cfg = getStore();
