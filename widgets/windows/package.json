@@ -1,6 +1,7 @@
 {
   "name": "moneycheck-windows-widget",
-  "version": "1.2.2",  "description": "MoneyCheck desktop widget for Windows",
+  "version": "1.2.4",
+  "description": "MoneyCheck desktop widget for Windows",
   "main": "main.js",
   "repository": {
     "type": "git",
@@ -36,10 +37,13 @@
       "publisherName": "MoneyCheck"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false,
       "perMachine": false,
       "createDesktopShortcut": false,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
     },
     "extraResources": [],
     "files": [
