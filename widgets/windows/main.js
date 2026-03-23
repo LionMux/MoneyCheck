@@ -177,7 +177,7 @@ function pinToDesktop(win) {
   if (process.platform !== "win32") return;
   try {
     // electron exposes setAlwaysOnTop with level — use 'desktop' level (below normal)
-    win.setAlwaysOnTop(false);
+    win.setAlwaysOnTop(true, 'below-normal');
     // Keep it below normal windows by not setting alwaysOnTop at all.
     // The window is non-focusable and skips taskbar.
   } catch (_) {}
@@ -202,7 +202,7 @@ function createWidgetWindow() {
     resizable: false,
     skipTaskbar: true,
     focusable: true,
-    type: process.platform === "linux" ? "desktop" : "normal",
+    
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -220,6 +220,7 @@ function createWidgetWindow() {
     const bgOpacity = cfg.get("bgOpacity");
     const ft = cfg.get("fullyTransparent");
     widgetWindow.webContents.send("apply-appearance", { bgColor, bgOpacity, fullyTransparent: ft });
+          fetchAndSend();
   });
 
   // Save window position when moved
@@ -400,7 +401,7 @@ function createTray() {
     const cfg = getStore();
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Показать виджет", click: () => {
-        if (widgetWindow) { widgetWindow.show(); widgetWindow.focus(); }
+        if (widgetWindow) { widgetWindow.show(); }
         else { createWidgetWindow(); fetchAndSend(); }
       }},
       { label: "Открыть MoneyCheck", click: () => shell.openExternal(cfg.get("backendUrl")), },
@@ -421,7 +422,6 @@ function createTray() {
 app.whenReady().then(() => {
   createTray();
   createWidgetWindow();
-  fetchAndSend();
   pollingInterval = setInterval(fetchAndSend, 60_000);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWidgetWindow();
