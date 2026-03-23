@@ -1,11 +1,12 @@
 /**
- * FinWise Windows Widget — Electron
+ * MoneyCheck Windows Widget — Electron
  *
- * Compact always-on-top window that shows balance summary.
+ * Desktop-pinned widget (below all windows, on the desktop layer).
  * Supports:
- *  - Persistent config via electron-store (backendUrl, authToken)
+ *  - Default backend: https://myfinwise.duckdns.org (configurable)
+ *  - Persistent config via electron-store (backendUrl, authToken, bgColor, bgOpacity, transparent)
  *  - In-widget login screen (POST /api/auth/login)
- *  - Settings screen (change server URL, test connection)
+ *  - Settings screen (server URL, bg color, opacity, full transparency)
  *  - Auto-polling every 60s
  *  - System tray with show/hide/quit
  *
@@ -15,16 +16,16 @@
  *
  * BUILD installer:
  *   npm run build
- *   -> dist/FinWise Widget Setup.exe
+ *   -> dist/MoneyCheck Widget Setup.exe
  */
-
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = require("electron");
 const path = require("path");
 const https = require("https");
 const http = require("http");
 
+const DEFAULT_BACKEND = "https://myfinwise.duckdns.org";
+
 // ── Config store (electron-store) ────────────────────────────────────────────
-// Lazy-load to avoid issues if not installed in dev without npm install
 let store = null;
 function getStore() {
   if (!store) {
@@ -32,19 +33,24 @@ function getStore() {
       const Store = require("electron-store");
       store = new Store({
         defaults: {
-          backendUrl: process.env.FINWISE_API ?? "http://localhost:5000",
+          backendUrl: process.env.MONEYCHECK_API ?? DEFAULT_BACKEND,
           authToken: "",
           windowX: null,
           windowY: null,
+          bgColor: "#0f1919",
+          bgOpacity: 0.92,
+          fullyTransparent: false,
         },
       });
     } catch {
-      // fallback: in-memory store if electron-store not installed
       const defaults = {
-        backendUrl: process.env.FINWISE_API ?? "http://localhost:5000",
+        backendUrl: process.env.MONEYCHECK_API ?? DEFAULT_BACKEND,
         authToken: "",
         windowX: null,
         windowY: null,
+        bgColor: "#0f1919",
+        bgOpacity: 0.92,
+        fullyTransparent: false,
       };
       store = {
         get: (k) => defaults[k],
@@ -59,7 +65,7 @@ let tray = null;
 let widgetWindow = null;
 let pollingInterval = null;
 
-// ── Helper: fetch JSON from API ──────────────────────────────────────────────
+// ── Helper: fetch JSON from API ───────────────────────────────────────────────
 function fetchJson(urlStr, options = {}) {
   return new Promise((resolve, reject) => {
     const mod = urlStr.startsWith("https") ? https : http;
@@ -81,7 +87,7 @@ function fetchJson(urlStr, options = {}) {
   });
 }
 
-// ── Helper: POST JSON ────────────────────────────────────────────────────────
+// ── Helper: POST JSON ─────────────────────────────────────────────────────────
 function postJson(urlStr, body) {
   return new Promise((resolve, reject) => {
     const mod = urlStr.startsWith("https") ? https : http;
@@ -106,9 +112,7 @@ function postJson(urlStr, body) {
           const parsed = JSON.parse(resp);
           if (res.statusCode >= 400) reject(new Error(parsed.error || "Login failed"));
           else resolve({ body: parsed, headers: res.headers });
-        } catch {
-          reject(new Error("Invalid JSON response"));
-        }
+        } catch { reject(new Error("Invalid JSON response")); }
       });
     });
     req.on("error", reject);
@@ -118,23 +122,38 @@ function postJson(urlStr, body) {
   });
 }
 
-// ── Create widget window ──────────────────────────────────────────────────────
+// ── Desktop-pinned window helpers ────────────────────────────────────────────
+// Windows: set HWND_BOTTOM so widget sits below all normal windows but above desktop icons
+function pinToDesktop(win) {
+  if (process.platform !== "win32") return;
+  try {
+    // electron exposes setAlwaysOnTop with level — use 'desktop' level (below normal)
+    win.setAlwaysOnTop(false);
+    // Keep it below normal windows by not setting alwaysOnTop at all.
+    // The window is non-focusable and skips taskbar.
+  } catch (_) {}
+}
+
+// ── Create widget window ───────────────────────────────────────────────────────
 function createWidgetWindow() {
   const cfg = getStore();
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const savedX = cfg.get("windowX");
   const savedY = cfg.get("windowY");
+  const fullyTransparent = cfg.get("fullyTransparent");
 
   widgetWindow = new BrowserWindow({
     width: 320,
-    height: 260,
+    height: 290,
     x: savedX ?? width - 340,
-    y: savedY ?? height - 280,
+    y: savedY ?? height - 310,
     frame: false,
     transparent: true,
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     resizable: false,
     skipTaskbar: true,
+    focusable: true,
+    type: process.platform === "linux" ? "desktop" : "normal",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -143,6 +162,16 @@ function createWidgetWindow() {
   });
 
   widgetWindow.loadFile(path.join(__dirname, "widget.html"));
+
+  // On Windows: move to bottom of z-order after load
+  widgetWindow.webContents.on("did-finish-load", () => {
+    pinToDesktop(widgetWindow);
+    // Send current appearance config to renderer
+    const bgColor = cfg.get("bgColor");
+    const bgOpacity = cfg.get("bgOpacity");
+    const ft = cfg.get("fullyTransparent");
+    widgetWindow.webContents.send("apply-appearance", { bgColor, bgOpacity, fullyTransparent: ft });
+  });
 
   // Save window position when moved
   widgetWindow.on("moved", () => {
@@ -156,44 +185,34 @@ function createWidgetWindow() {
   widgetWindow.on("closed", () => { widgetWindow = null; });
 }
 
-// ── Data polling ──────────────────────────────────────────────────────────────
+// ── Data polling ───────────────────────────────────────────────────────────────
 async function fetchAndSend() {
   const cfg = getStore();
-  const apiBase = cfg.get("backendUrl") || "http://localhost:5000";
+  const apiBase = cfg.get("backendUrl") || DEFAULT_BACKEND;
   const authToken = cfg.get("authToken") || "";
-
   try {
     let data = null;
-
-    // Try the dedicated widget endpoint first
     try {
       const headers = authToken ? { "Cookie": `finwise_token=${authToken}` } : {};
       data = await fetchJson(`${apiBase}/api/widget/summary`, { headers });
     } catch (err) {
       if (err.message === "UNAUTHORIZED") {
-        // Token invalid or missing — show login screen
         if (widgetWindow && !widgetWindow.isDestroyed()) {
           widgetWindow.webContents.send("show-login");
         }
         return;
       }
-      // Fallback to /api/progress (demo mode without auth)
       try {
         const progress = await fetchJson(`${apiBase}/api/progress`);
         data = {
-          totalBalance: 0,
-          monthIncome: 0,
-          monthExpense: 0,
+          totalBalance: 0, monthIncome: 0, monthExpense: 0,
           streak: progress?.streak ?? 0,
           level: progress?.level ?? 1,
           totalXp: progress?.totalXp ?? 0,
           demo: true,
         };
-      } catch {
-        throw new Error("Server unavailable");
-      }
+      } catch { throw new Error("Server unavailable"); }
     }
-
     if (widgetWindow && !widgetWindow.isDestroyed()) {
       widgetWindow.webContents.send("data-update", data);
     }
@@ -204,7 +223,7 @@ async function fetchAndSend() {
   }
 }
 
-// ── IPC handlers ──────────────────────────────────────────────────────────────
+// ── IPC handlers ───────────────────────────────────────────────────────────────
 ipcMain.handle("open-app", () => {
   const cfg = getStore();
   shell.openExternal(`${cfg.get("backendUrl")}`);
@@ -216,58 +235,64 @@ ipcMain.handle("hide-widget", () => {
 
 ipcMain.handle("refresh-data", () => fetchAndSend());
 
-// Get current config
 ipcMain.handle("get-config", () => {
   const cfg = getStore();
   return {
     backendUrl: cfg.get("backendUrl"),
     hasToken: !!(cfg.get("authToken")),
+    bgColor: cfg.get("bgColor"),
+    bgOpacity: cfg.get("bgOpacity"),
+    fullyTransparent: cfg.get("fullyTransparent"),
   };
 });
 
-// Save server URL
 ipcMain.handle("set-backend-url", (_, url) => {
   const cfg = getStore();
   cfg.set("backendUrl", url.trim());
   return { ok: true };
 });
 
-// Login: POST /api/auth/login, store cookie token
+// Save appearance settings and push to renderer
+ipcMain.handle("set-appearance", (_, { bgColor, bgOpacity, fullyTransparent }) => {
+  const cfg = getStore();
+  if (bgColor !== undefined) cfg.set("bgColor", bgColor);
+  if (bgOpacity !== undefined) cfg.set("bgOpacity", bgOpacity);
+  if (fullyTransparent !== undefined) cfg.set("fullyTransparent", fullyTransparent);
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    widgetWindow.webContents.send("apply-appearance", {
+      bgColor: cfg.get("bgColor"),
+      bgOpacity: cfg.get("bgOpacity"),
+      fullyTransparent: cfg.get("fullyTransparent"),
+    });
+  }
+  return { ok: true };
+});
+
 ipcMain.handle("do-login", async (_, { email, password }) => {
   const cfg = getStore();
-  const apiBase = cfg.get("backendUrl") || "http://localhost:5000";
+  const apiBase = cfg.get("backendUrl") || DEFAULT_BACKEND;
   try {
     const { body, headers } = await postJson(`${apiBase}/api/auth/login`, { email, password });
-    // Extract token from set-cookie header
     const setCookie = headers["set-cookie"] || [];
     let token = "";
     for (const cookie of setCookie) {
       const match = cookie.match(/finwise_token=([^;]+)/);
       if (match) { token = match[1]; break; }
     }
-    if (token) {
-      cfg.set("authToken", token);
-      return { ok: true, user: body };
-    }
-    // If no cookie, use JWT from response body if present
-    if (body.token) {
-      cfg.set("authToken", body.token);
-      return { ok: true, user: body };
-    }
+    if (token) { cfg.set("authToken", token); return { ok: true, user: body }; }
+    if (body.token) { cfg.set("authToken", body.token); return { ok: true, user: body }; }
     return { ok: false, error: "No token in response" };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// Logout: clear stored token
 ipcMain.handle("do-logout", () => {
   const cfg = getStore();
   cfg.set("authToken", "");
   return { ok: true };
 });
 
-// Test connection to backend
 ipcMain.handle("test-connection", async (_, url) => {
   try {
     const apiBase = (url || getStore().get("backendUrl")).trim();
@@ -279,7 +304,7 @@ ipcMain.handle("test-connection", async (_, url) => {
   }
 });
 
-// ── Tray ──────────────────────────────────────────────────────────────────────
+// ── Tray ───────────────────────────────────────────────────────────────────────
 function createTray() {
   const iconPath = path.join(__dirname, "icon.png");
   let icon;
@@ -289,40 +314,22 @@ function createTray() {
   } catch {
     icon = nativeImage.createEmpty();
   }
-
   tray = new Tray(icon);
-  tray.setToolTip("FinWise Widget");
-
+  tray.setToolTip("MoneyCheck Widget");
   const updateMenu = () => {
     const cfg = getStore();
     tray.setContextMenu(Menu.buildFromTemplate([
-      {
-        label: "Показать виджет",
-        click: () => {
-          if (widgetWindow) {
-            widgetWindow.show();
-            widgetWindow.focus();
-          } else {
-            createWidgetWindow();
-            fetchAndSend();
-          }
-        },
-      },
-      {
-        label: "Открыть FinWise в браузере",
-        click: () => shell.openExternal(cfg.get("backendUrl")),
-      },
-      {
-        label: "Обновить данные",
-        click: () => fetchAndSend(),
-      },
+      { label: "Показать виджет", click: () => {
+        if (widgetWindow) { widgetWindow.show(); widgetWindow.focus(); }
+        else { createWidgetWindow(); fetchAndSend(); }
+      }},
+      { label: "Открыть MoneyCheck", click: () => shell.openExternal(cfg.get("backendUrl")), },
+      { label: "Обновить данные", click: () => fetchAndSend(), },
       { type: "separator" },
       { label: "Выход", role: "quit" },
     ]));
   };
-
   updateMenu();
-
   tray.on("click", () => {
     if (widgetWindow) {
       widgetWindow.isVisible() ? widgetWindow.hide() : widgetWindow.show();
@@ -330,23 +337,19 @@ function createTray() {
   });
 }
 
-// ── App lifecycle ─────────────────────────────────────────────────────────────
+// ── App lifecycle ──────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   createTray();
   createWidgetWindow();
-
-  // Start polling (every 60s)
   fetchAndSend();
   pollingInterval = setInterval(fetchAndSend, 60_000);
-
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWidgetWindow();
   });
 });
 
 app.on("window-all-closed", (e) => {
-  // Keep running in tray — do not quit
-  e.preventDefault();
+  e.preventDefault(); // keep running in tray
 });
 
 app.on("before-quit", () => {
