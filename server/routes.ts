@@ -7,10 +7,6 @@ import {
   clearCookieToken, signJwt, verifyPassword
 } from "./auth";
 
-// ── Storage abstraction (supports both MemStorage and PgStorage) ──────────
-
-type AnyStorage = import("./storage").IStorage | import("./storage-pg").PgStorage;
-
 let _storage: import("./storage").IStorage | null = null;
 let _pgStorage: import("./storage-pg").PgStorage | null = null;
 
@@ -128,9 +124,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       accounts.map(async (acc) => ({
         ...acc,
         balance: await pg.getAccountBalance(acc.id),
-        debt: acc.type === "credit"
-          ? await pg.getCreditDebt(acc.id)
-          : undefined,
+        debt: acc.type === "credit" ? await pg.getCreditDebt(acc.id) : undefined,
       }))
     );
     res.json(enriched);
@@ -160,12 +154,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ── TRANSACTIONS ──────────────────────────────────────────────────────────
 
   app.get("/api/transactions", guard, async (req: AuthRequest, res) => {
-    if (pg) {
-      const txs = await pg.getTransactions(getUserId(req));
-      return res.json(txs);
-    }
-    const txs = await (mem as any).getTransactions();
-    res.json(txs);
+    if (pg) return res.json(await pg.getTransactions(getUserId(req)));
+    res.json(await (mem as any).getTransactions());
   });
 
   app.get("/api/transactions/monthly-summary", guard, async (req: AuthRequest, res) => {
@@ -176,8 +166,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     for (const t of txs) {
       const month = String(t.date).slice(0, 7);
       if (!map[month]) map[month] = { income: 0, expense: 0 };
-      if (t.type === "income") map[month].income += Number(t.amount);
-      else if (t.type === "expense") map[month].expense += Math.abs(Number(t.amount));
+      if (t.type === "income" || t.type === "creditPayment") map[month].income += Number(t.amount);
+      else if (t.type === "expense" || t.type === "creditPurchase") map[month].expense += Math.abs(Number(t.amount));
     }
     const result = Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -326,20 +316,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── WIDGET SUMMARY ────────────────────────────────────────────────────────
-  // GET /api/widget/summary
-  // - totalBalance: только НЕ-кредитные счета (debit, cash, savings)
-  // - monthIncome/monthExpense: только type=income/expense (без creditPurchase/creditPayment)
+  //
+  // Логика полностью совпадает с Dashboard.tsx:
+  //   totalBalance  = счета типов debit | cash | other (isArchived=false)
+  //   monthIncome   = type income | creditPayment за текущий месяц
+  //   monthExpense  = type expense | creditPurchase за текущий месяц
   app.get("/api/widget/summary", async (req: AuthRequest, res) => {
     if (!pg) {
-      return res.json({
-        totalBalance: 0,
-        monthIncome: 0,
-        monthExpense: 0,
-        streak: 0,
-        level: 1,
-        totalXp: 0,
-        demo: true,
-      });
+      return res.json({ totalBalance: 0, monthIncome: 0, monthExpense: 0, streak: 0, level: 1, totalXp: 0, demo: true });
     }
 
     let userId: number | null = null;
@@ -359,26 +343,25 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     try {
       const accounts = await pg.getAccounts(userId);
 
-      // Суммируем баланс только не-кредитных счетов
+      // Точно как в Dashboard: debit + cash + other, без credit и savings
       let totalBalance = 0;
       for (const acc of accounts) {
-        if (acc.type !== "credit") {
+        if (!acc.isArchived && (acc.type === "debit" || acc.type === "cash" || acc.type === "other")) {
           totalBalance += await pg.getAccountBalance(acc.id);
         }
       }
 
-      // Транзакции за текущий месяц — только income/expense (без кредитных операций)
       const allTxs = await pg.getTransactions(userId);
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const monthTxs = allTxs.filter(t => String(t.date).slice(0, 7) === currentMonth);
 
+      // Точно как в Dashboard: income + creditPayment = доходы, expense + creditPurchase = расходы
       let monthIncome = 0;
       let monthExpense = 0;
       for (const t of monthTxs) {
-        if (t.type === "income") monthIncome += Number(t.amount);
-        else if (t.type === "expense") monthExpense += Math.abs(Number(t.amount));
-        // creditPurchase и creditPayment намеренно пропускаем
+        if (t.type === "income" || t.type === "creditPayment") monthIncome += Number(t.amount);
+        else if (t.type === "expense" || t.type === "creditPurchase") monthExpense += Math.abs(Number(t.amount));
       }
 
       const progress = await pg.getUserProgress(userId);
@@ -397,7 +380,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ── WIDGET AUTH (OAuth-like flow для Scriptable iOS) ──────────────────────
+  // ── WIDGET AUTH ──────────────────────────────────────────────────────────
 
   app.post("/api/widget/auth/issue", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
@@ -414,9 +397,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     try {
       const { code } = z.object({ code: z.string() }).parse(req.body);
       const userId = await pg.consumeWidgetCode(code);
-      if (!userId) {
-        return res.status(401).json({ error: "Код недействителен или истёк" });
-      }
+      if (!userId) return res.status(401).json({ error: "Код недействителен или истёк" });
       const token = signJwt(userId, 60 * 60 * 24 * 30);
       res.json({ token });
     } catch (e: any) {
