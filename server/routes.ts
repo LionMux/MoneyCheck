@@ -3,8 +3,8 @@ import { Server } from "http";
 import { z } from "zod";
 import { insertTransactionSchema, insertBudgetSchema, insertSavingsGoalSchema, insertAccountSchema } from "@shared/schema";
 import {
-  authMiddleware, AuthRequest, setCookieToken,
-  clearCookieToken, signJwt, verifyPassword
+  authMiddleware, patOrJwtMiddleware, AuthRequest, setCookieToken,
+  clearCookieToken, signJwt, verifyPassword, generatePAT
 } from "./auth";
 
 let _storage: import("./storage").IStorage | null = null;
@@ -113,7 +113,98 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(safe);
   });
 
-  const guard = pg ? authMiddleware : (_req: any, _res: any, next: any) => next();
+  // guard: patOrJwtMiddleware если есть БД (принимает cookie JWT и Bearer PAT),
+  // иначе пропускаем всё для demo-режима без БД
+  const guard = pg ? patOrJwtMiddleware : (_req: any, _res: any, next: any) => next();
+
+  // ── PERSONAL ACCESS TOKENS (PAT) ─────────────────────────────────────────
+  //
+  // Используются внешними клиентами: iOS Shortcuts, Scriptable и др.
+  // Браузер продолжает использовать httpOnly cookie (JWT).
+  //
+  // Создание PAT требует активной cookie-сессии (authMiddleware).
+  // Использование PAT — через Bearer-заголовок на любом защищённом эндпоинте.
+
+  /**
+   * GET /api/pat
+   * Список PAT текущего пользователя (без сырого токена).
+   */
+  app.get("/api/pat", authMiddleware, async (req: AuthRequest, res) => {
+    if (!pg) return res.json([]);
+    try {
+      const tokens = await pg.getPersonalAccessTokens(req.userId!);
+      res.json(tokens);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/pat/create
+   * Создать новый PAT. Токен возвращается ОДИН РАЗ — клиент должен его сохранить.
+   * Body: { name?: string }  — например "iOS Shortcuts", "Scriptable Widget"
+   */
+  app.post("/api/pat/create", authMiddleware, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const { name } = z.object({
+        name: z.string().min(1).max(100).optional(),
+      }).parse(req.body);
+
+      const token = generatePAT();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const pat = await pg.createPersonalAccessToken(req.userId!, token, expiresAt, name ?? "API Token");
+
+      res.json({
+        id: pat.id,
+        name: pat.name,
+        token, // ⚠️ Только здесь! Сохраните токен — он больше не будет виден
+        expiresAt: pat.expiresAt,
+        createdAt: pat.createdAt,
+      });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  /**
+   * DELETE /api/pat/:id
+   * Отозвать PAT (мягкое удаление — revokedAt проставляется, токен перестаёт работать).
+   */
+  app.delete("/api/pat/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const patId = z.coerce.number().parse(req.params.id);
+      await pg.revokePersonalAccessToken(patId, req.userId!);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/pat/test
+   * Проверить валидность PAT (для отладки из Scriptable/Shortcuts).
+   * Headers: Authorization: Bearer finwise_pat_xxx
+   * Не требует cookie — полностью открыт для внешних клиентов.
+   */
+  app.post("/api/pat/test", async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        return res.status(400).json({ error: "Требуется заголовок: Authorization: Bearer finwise_pat_xxx" });
+      }
+      const token = authHeader.slice(7);
+      const userId = await pg.verifyAndUpdatePersonalAccessToken(token);
+      if (!userId) {
+        return res.status(401).json({ ok: false, error: "Токен недействителен или истёк" });
+      }
+      res.json({ ok: true, userId, message: "Токен действителен ✅" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // ── ACCOUNTS ──────────────────────────────────────────────────────────────
 
@@ -290,10 +381,16 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── CATEGORIES ────────────────────────────────────────────────────────────
+  // Поддерживает PAT через guard (patOrJwtMiddleware)
+  // Shortcuts использует: GET /api/categories?type=income → динамический список категорий
 
   app.get("/api/categories", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
-    res.json(await pg.getCategories(getUserId(req)));
+    const { type } = req.query;
+    const all = await pg.getCategories(getUserId(req));
+    // Опциональная фильтрация по type=income|expense для Shortcuts
+    const filtered = type ? all.filter(c => c.type === type) : all;
+    res.json(filtered);
   });
 
   // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
@@ -321,19 +418,40 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   //   totalBalance  = счета типов debit | cash | other (isArchived=false)
   //   monthIncome   = type income | creditPayment за текущий месяц
   //   monthExpense  = type expense | creditPurchase за текущий месяц
+  //
+  // Поддерживает два способа аутентификации:
+  //   1. Cookie finwise_token (JWT) — браузер/Electron
+  //   2. Bearer finwise_pat_xxx — Scriptable виджет
   app.get("/api/widget/summary", async (req: AuthRequest, res) => {
     if (!pg) {
       return res.json({ totalBalance: 0, monthIncome: 0, monthExpense: 0, streak: 0, level: 1, totalXp: 0, demo: true });
     }
 
     let userId: number | null = null;
-    const token =
-      (req as any).cookies?.["finwise_token"] ??
-      (req.headers.authorization?.replace("Bearer ", "") || null);
-    if (token) {
+
+    // 1. JWT в cookie
+    const cookieToken = (req as any).cookies?.["finwise_token"];
+    if (cookieToken) {
       const { verifyJwt } = await import("./auth");
-      const payload = verifyJwt(token);
+      const payload = verifyJwt(cookieToken);
       if (payload) userId = payload.sub;
+    }
+
+    // 2. Bearer: PAT или JWT
+    if (!userId) {
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        const bearerToken = authHeader.slice(7);
+        if (bearerToken.startsWith("finwise_pat_")) {
+          // PAT — проверяем через storage (обновляет lastUsedAt)
+          userId = await pg.verifyAndUpdatePersonalAccessToken(bearerToken);
+        } else {
+          // JWT в Bearer (обратная совместимость)
+          const { verifyJwt } = await import("./auth");
+          const payload = verifyJwt(bearerToken);
+          if (payload) userId = payload.sub;
+        }
+      }
     }
 
     if (!userId) {
@@ -343,7 +461,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     try {
       const accounts = await pg.getAccounts(userId);
 
-      // Точно как в Dashboard: debit + cash + other, без credit и savings
       let totalBalance = 0;
       for (const acc of accounts) {
         if (!acc.isArchived && (acc.type === "debit" || acc.type === "cash" || acc.type === "other")) {
@@ -356,7 +473,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const monthTxs = allTxs.filter(t => String(t.date).slice(0, 7) === currentMonth);
 
-      // Точно как в Dashboard: income + creditPayment = доходы, expense + creditPurchase = расходы
       let monthIncome = 0;
       let monthExpense = 0;
       for (const t of monthTxs) {
