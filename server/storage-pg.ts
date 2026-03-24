@@ -270,7 +270,6 @@ export class PgStorage {
       .where(and(eq(S.accounts.id, id), eq(S.accounts.userId, userId)));
   }
 
-  /** Real-time balance = initialBalance + sum of all transactions */
   async getAccountBalance(accountId: number): Promise<number> {
     const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
     if (!acc) return 0;
@@ -279,7 +278,6 @@ export class PgStorage {
     return acc.initialBalance + delta;
   }
 
-  /** Credit debt = sum of creditPurchase - sum of creditPayment */
   async getCreditDebt(accountId: number): Promise<number> {
     const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
     if (!acc) return 0;
@@ -360,17 +358,10 @@ export class PgStorage {
     if (accountId) {
       const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
       if (!acc) throw new Error("Счёт не найден");
-
-      // Для любого типа счёта (включая кредитку) используем реальный баланс
-      // Кредитка: balance = initialBalance (пополненный пользователем) + транзакции
-      // Это именно те деньги, которыми пользователь физически располагает
       const balance = await this.getAccountBalance(accountId);
       if (balance < amount) {
         throw new Error(`Недостаточно средств на счёте. Доступно: ${balance.toFixed(0)} ₽, требуется: ${amount.toFixed(0)} ₽`);
       }
-
-      // Для кредитки тип транзакции — expense (списание с баланса)
-      // Для дебета/наличных — тоже expense
       await db.insert(S.transactions).values({
         userId,
         accountId,
@@ -407,7 +398,7 @@ export class PgStorage {
   }
 
   async addCategory(userId: number, data: Omit<S.InsertCategory, "userId">): Promise<S.Category> {
-    const [cat] = await db.insert(S.categories).values({ ...cat, userId }).returning();
+    const [cat] = await db.insert(S.categories).values({ ...data, userId }).returning();
     return cat;
   }
 
@@ -493,6 +484,7 @@ export class PgStorage {
       .set({ isRead: true })
       .where(and(eq(S.notificationLog.id, id), eq(S.notificationLog.userId, userId)));
   }
+
   // ── WIDGET AUTH CODES ─────────────────────────────────────────────────────
 
   async createWidgetCode(userId: number, code: string, expiresAt: string): Promise<void> {
@@ -503,16 +495,89 @@ export class PgStorage {
     const [entry] = await db.select().from(S.widgetAuthCodes)
       .where(eq(S.widgetAuthCodes.code, code));
     if (!entry) return null;
-    if (entry.usedAt) return null; // уже использован
-    const now = new Date();
+    if (entry.usedAt) return null;
+    const nowDate = new Date();
     const expires = new Date(entry.expiresAt);
-    if (now > expires) {
+    if (nowDate > expires) {
       await db.delete(S.widgetAuthCodes).where(eq(S.widgetAuthCodes.code, code));
       return null;
     }
-    // Помечаем как использованный и удаляем
     await db.delete(S.widgetAuthCodes).where(eq(S.widgetAuthCodes.code, code));
     return entry.userId;
+  }
+
+  // ── PERSONAL ACCESS TOKENS (PAT) ──────────────────────────────────────────
+  //
+  // Используются внешними клиентами: iOS Shortcuts, Scriptable, и т.д.
+  // Браузер продолжает использовать httpOnly JWT cookie.
+
+  /**
+   * Создать новый PAT для пользователя.
+   * Токен генерируется в routes.ts через generatePAT() и передаётся сюда.
+   */
+  async createPersonalAccessToken(
+    userId: number,
+    token: string,
+    expiresAt: string,
+    name: string = "API Token"
+  ): Promise<S.PersonalAccessToken> {
+    const [pat] = await db.insert(S.personalAccessTokens).values({
+      userId,
+      token,
+      name,
+      expiresAt,
+      createdAt: now(),
+    }).returning();
+    return pat;
+  }
+
+  /**
+   * Список PAT пользователя (без сырого токена — только метаданные).
+   * Токен не возвращается после создания — это безопасно.
+   */
+  async getPersonalAccessTokens(userId: number): Promise<Omit<S.PersonalAccessToken, "token">[]> {
+    const rows = await db.select().from(S.personalAccessTokens)
+      .where(and(
+        eq(S.personalAccessTokens.userId, userId),
+        // Показываем только не отозванные
+        eq(S.personalAccessTokens.revokedAt, null as any)
+      ))
+      .orderBy(desc(S.personalAccessTokens.createdAt));
+    // Убираем поле token из ответа
+    return rows.map(({ token: _token, ...rest }) => rest);
+  }
+
+  /**
+   * Мягко отозвать PAT (revokedAt = now).
+   * Проверяем userId чтобы нельзя было отозвать чужой токен.
+   */
+  async revokePersonalAccessToken(id: number, userId: number): Promise<void> {
+    await db.update(S.personalAccessTokens)
+      .set({ revokedAt: now() })
+      .where(and(
+        eq(S.personalAccessTokens.id, id),
+        eq(S.personalAccessTokens.userId, userId)
+      ));
+  }
+
+  /**
+   * Проверить PAT и обновить lastUsedAt.
+   * Возвращает userId если токен валиден, null — если нет.
+   * Используется в patOrJwtMiddleware и /api/pat/test.
+   */
+  async verifyAndUpdatePersonalAccessToken(token: string): Promise<number | null> {
+    const [pat] = await db.select().from(S.personalAccessTokens)
+      .where(eq(S.personalAccessTokens.token, token))
+      .limit(1);
+    if (!pat) return null;
+    if (pat.revokedAt) return null;
+    if (new Date() > new Date(pat.expiresAt)) return null;
+    // Обновляем lastUsedAt асинхронно (не блокируем запрос)
+    db.update(S.personalAccessTokens)
+      .set({ lastUsedAt: now() })
+      .where(eq(S.personalAccessTokens.id, pat.id))
+      .catch(() => {});
+    return pat.userId;
   }
 
   // ── CRON HELPERS ──────────────────────────────────────────────────────────
