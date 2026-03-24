@@ -16,7 +16,7 @@ export const users = pgTable("users", {
   notifyInactivity: boolean("notify_inactivity").notNull().default(true),
   notifyEmail:      boolean("notify_email").notNull().default(false),
   notifyPush:       boolean("notify_push").notNull().default(false),
-  pushSubscription: text("push_subscription"),          // JSON: PushSubscription
+  pushSubscription: text("push_subscription"),
   createdAt:        text("created_at").notNull().default(""),
 });
 
@@ -36,6 +36,34 @@ export const widgetAuthCodes = pgTable("widget_auth_codes", {
 
 export type WidgetAuthCode = typeof widgetAuthCodes.$inferSelect;
 
+// ─── PERSONAL ACCESS TOKENS (PAT) ───────────────────────────────────────────
+//
+// Для внешних клиентов: iOS Shortcuts, Scriptable, сторонние интеграции.
+// Браузер использует httpOnly cookie (JWT), внешние клиенты — Bearer PAT.
+//
+// Формат токена: finwise_pat_<64 hex символа>
+// Заголовок:     Authorization: Bearer finwise_pat_xxxxxxxx...
+//
+// Жизненный цикл:
+//   - Создаётся через POST /api/pat/create (требует cookie-сессии)
+//   - Действует 30 дней от момента создания
+//   - Может быть отозван через DELETE /api/pat/:id
+//   - Мягкое удаление: revokedAt != null → токен отклоняется
+//   - lastUsedAt обновляется при каждом успешном запросе (аудит)
+
+export const personalAccessTokens = pgTable("personal_access_tokens", {
+  id:         serial("id").primaryKey(),
+  userId:     integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token:      text("token").notNull().unique(),
+  name:       text("name").notNull().default("API Token"),
+  lastUsedAt: text("last_used_at"),
+  createdAt:  text("created_at").notNull().default(""),
+  expiresAt:  text("expires_at").notNull(),
+  revokedAt:  text("revoked_at"),
+});
+
+export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
+export type InsertPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
 
 // ─── ACCOUNTS (debit / credit / cash / other) ──────────────────────────────
 
@@ -43,13 +71,12 @@ export const accounts = pgTable("accounts", {
   id:             serial("id").primaryKey(),
   userId:         integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name:           text("name").notNull(),
-  type:           text("type").notNull().default("debit"), // debit | credit | cash | other
+  type:           text("type").notNull().default("debit"),
   currency:       text("currency").notNull().default("RUB"),
   initialBalance: real("initial_balance").notNull().default(0),
   color:          text("color").notNull().default("#20808D"),
   icon:           text("icon").notNull().default("Wallet"),
   isArchived:     boolean("is_archived").notNull().default(false),
-  // credit-specific (only when type='credit')
   creditLimit:    real("credit_limit"),
   billingDay:     integer("billing_day"),
   dueDay:         integer("due_day"),
@@ -68,7 +95,7 @@ export const categories = pgTable("categories", {
   id:        serial("id").primaryKey(),
   userId:    integer("user_id").references(() => users.id, { onDelete: "cascade" }),
   name:      text("name").notNull(),
-  type:      text("type").notNull().default("expense"), // income | expense
+  type:      text("type").notNull().default("expense"),
   icon:      text("icon").notNull().default("Tag"),
   color:     text("color").notNull().default("#20808D"),
   isDefault: boolean("is_default").notNull().default(false),
@@ -89,7 +116,7 @@ export const transactions = pgTable("transactions", {
   currency:           text("currency").notNull().default("RUB"),
   category:           text("category").notNull(),
   categoryId:         integer("category_id").references(() => categories.id, { onDelete: "set null" }),
-  type:               text("type").notNull(), // income | expense | transfer | creditPurchase | creditPayment
+  type:               text("type").notNull(),
   date:               text("date").notNull(),
   note:               text("note"),
   counterparty:       text("counterparty"),
@@ -110,7 +137,7 @@ export const budgets = pgTable("budgets", {
   category: text("category").notNull(),
   limit:    real("limit").notNull(),
   color:    text("color").notNull().default("#20808D"),
-  period:   text("period").notNull().default("month"),  // month | week
+  period:   text("period").notNull().default("month"),
 });
 
 export const insertBudgetSchema = createInsertSchema(budgets).omit({ id: true }).partial({ userId: true });
@@ -144,7 +171,7 @@ export const lessons = pgTable("lessons", {
   description:    text("description").notNull(),
   content:        text("content").notNull(),
   category:       text("category").notNull(),
-  difficulty:     text("difficulty").notNull(), // beginner | intermediate | advanced
+  difficulty:     text("difficulty").notNull(),
   xpReward:       integer("xp_reward").notNull().default(50),
   icon:           text("icon").notNull().default("BookOpen"),
   estimatedMinutes: integer("estimated_minutes").notNull().default(5),
@@ -191,8 +218,8 @@ export type CompletedLesson = typeof completedLessons.$inferSelect;
 export const notificationLog = pgTable("notification_log", {
   id:        serial("id").primaryKey(),
   userId:    integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  type:      text("type").notNull(), // budget_alert | credit_due | inactivity
-  channel:   text("channel").notNull(), // push | email
+  type:      text("type").notNull(),
+  channel:   text("channel").notNull(),
   message:   text("message").notNull(),
   sentAt:    text("sent_at").notNull().default(""),
   isRead:    boolean("is_read").notNull().default(false),
@@ -212,6 +239,11 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   progress: one(userProgress, { fields: [users.id], references: [userProgress.userId] }),
   completedLessons: many(completedLessons),
   notifications: many(notificationLog),
+  personalAccessTokens: many(personalAccessTokens),
+}));
+
+export const personalAccessTokensRelations = relations(personalAccessTokens, ({ one }) => ({
+  user: one(users, { fields: [personalAccessTokens.userId], references: [users.id] }),
 }));
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
