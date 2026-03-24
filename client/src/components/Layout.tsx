@@ -6,7 +6,7 @@ import type { UserProgress } from "@shared/schema";
 import {
   LayoutDashboard, ArrowLeftRight, PieChart,
   Target, BookOpen, Sun, Moon, Zap, Star,
-  Wallet, Bell, LogOut, Menu, X
+  Wallet, Bell, LogOut, Menu, X, Settings2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,13 +21,14 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: "/", label: "Дашборд", icon: <LayoutDashboard size={18} />, testId: "nav-dashboard" },
-  { href: "/transactions", label: "Операции", icon: <ArrowLeftRight size={18} />, testId: "nav-transactions" },
-  { href: "/accounts", label: "Счета", icon: <Wallet size={18} />, testId: "nav-accounts" },
-  { href: "/budget", label: "Бюджет", icon: <PieChart size={18} />, testId: "nav-budget" },
-  { href: "/goals", label: "Цели", icon: <Target size={18} />, testId: "nav-goals" },
-  { href: "/learn", label: "Обучение", icon: <BookOpen size={18} />, testId: "nav-learn" },
-  { href: "/notifications", label: "Уведомления", icon: <Bell size={18} />, testId: "nav-notifications" },
+  { href: "/",             label: "Дашборд",     icon: <LayoutDashboard size={18} />, testId: "nav-dashboard" },
+  { href: "/transactions", label: "Операции",    icon: <ArrowLeftRight size={18} />,  testId: "nav-transactions" },
+  { href: "/accounts",    label: "Счета",        icon: <Wallet size={18} />,          testId: "nav-accounts" },
+  { href: "/budget",      label: "Бюджет",       icon: <PieChart size={18} />,        testId: "nav-budget" },
+  { href: "/goals",       label: "Цели",         icon: <Target size={18} />,          testId: "nav-goals" },
+  { href: "/learn",       label: "Обучение",     icon: <BookOpen size={18} />,        testId: "nav-learn" },
+  { href: "/notifications",label: "Уведомления", icon: <Bell size={18} />,            testId: "nav-notifications" },
+  { href: "/settings",   label: "Настройки",    icon: <Settings2 size={18} />,       testId: "nav-settings" },
 ];
 
 const mobileNavItems = navItems.slice(0, 5);
@@ -141,7 +142,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <span className="dark:hidden">Светлая тема</span>
           <span className="hidden dark:block">Тёмная тема</span>
         </button>
-        
       </div>
     </>
   );
