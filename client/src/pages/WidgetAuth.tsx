@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
  *
  * ┌─────────────────────────────────────────────────────┐
  * │ iPhone / iPad  → создаёт PAT → редирект в Shortcuts │
- * │                  shortcuts://x-callback-url/run      │
- * │                  ?name=FinWise&token=finwise_pat_xxx  │
+ * │                  shortcuts://run-shortcut            │
+ * │                  ?name=FinWise&input=text            │
+ * │                  &text=finwise_pat_xxx               │
  * ├─────────────────────────────────────────────────────┤
  * │ Всё остальное  → создаёт PAT → показывает токен     │
  * │ (Mac, Android) с кнопкой «Скопировать»              │
@@ -110,12 +111,14 @@ export default function WidgetAuthPage() {
       setStatus("success");
 
       // 3a. iOS → авто-редирект в Shortcuts
+      // Используем shortcuts://run-shortcut?name=...&input=text&text=TOKEN
+      // (единственный способ передать данные в шорткат через URL на iOS)
       if (strat === "shortcuts") {
         setMessage("Токен создан! Передаём в Shortcuts…");
         const deeplink =
-          `shortcuts://x-callback-url/run?name=FinWise` +
-          `&x-success=finwise://auth-success` +
-          `&token=${encodeURIComponent(newToken)}`;
+          `shortcuts://run-shortcut?name=FinWise` +
+          `&input=text` +
+          `&text=${encodeURIComponent(newToken)}`;
         setTimeout(() => {
           window.location.href = deeplink;
         }, 600);
@@ -165,7 +168,7 @@ export default function WidgetAuthPage() {
     : status === "success" && !isScriptable
       ? "Токен готов"
     : status === "success"
-      ? "Гото!"
+      ? "Готово!"
     : "Подключить";
 
   return (
@@ -202,14 +205,14 @@ export default function WidgetAuthPage() {
             </div>
           )}
 
-          {/* iOS Shortcuts — показываем кнопку ручного редиректа если автоматом не сработало */}
+          {/* iOS Shortcuts — кнопка редиректа + fallback копирование */}
           {status === "success" && strategy === "shortcuts" && !isScriptable && token && (
             <div className="space-y-3 pt-1">
               <a
                 href={
-                  `shortcuts://x-callback-url/run?name=FinWise` +
-                  `&x-success=finwise://auth-success` +
-                  `&token=${encodeURIComponent(token)}`
+                  `shortcuts://run-shortcut?name=FinWise` +
+                  `&input=text` +
+                  `&text=${encodeURIComponent(token)}`
                 }
                 className="flex items-center justify-center gap-2 w-full py-3 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-xl transition-colors text-sm"
               >
