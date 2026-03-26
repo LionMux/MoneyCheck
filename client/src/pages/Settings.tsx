@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal
+  Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
   AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
 } from "@/components/ui/alert-dialog";
+import CategoryManager from "@/components/CategoryManager";
 
 interface PAT {
   id: number;
@@ -82,21 +83,32 @@ export default function SettingsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleCreate = () => {
-    createMutation.mutate(tokenName);
-  };
-
-  const handleCloseNewToken = () => {
-    setNewToken(null);
-    setCreateOpen(false);
-  };
+  const handleCreate = () => createMutation.mutate(tokenName);
+  const handleCloseNewToken = () => { setNewToken(null); setCreateOpen(false); };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="max-w-2xl mx-auto space-y-10">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Настройки</h1>
         <p className="text-muted-foreground text-sm mt-1">Управление аккаунтом и интеграциями</p>
       </div>
+
+      {/* CATEGORIES SECTION */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <LayoutGrid size={18} className="text-primary" />
+          <h2 className="text-base font-semibold">Категории</h2>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
+          <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
+          <span>
+            Перетащите категории чтобы изменить порядок. Стандартные категории нельзя удалить, но можно переименовать.
+          </span>
+        </div>
+        <CategoryManager />
+      </section>
+
+      <div className="border-t border-border" />
 
       {/* PAT SECTION */}
       <section className="space-y-4">
@@ -147,9 +159,7 @@ export default function SettingsPage() {
                       ? <span className="text-destructive">Истёк {formatDate(pat.expiresAt)}</span>
                       : <span>До {formatDate(pat.expiresAt)}</span>
                     }
-                    {pat.lastUsedAt && (
-                      <> · Исп. {formatDate(pat.lastUsedAt)}</>
-                    )}
+                    {pat.lastUsedAt && <> · Исп. {formatDate(pat.lastUsedAt)}</>}
                   </p>
                 </div>
                 {isExpired(pat.expiresAt)
@@ -157,8 +167,7 @@ export default function SettingsPage() {
                   : <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/40">Активен</Badge>
                 }
                 <Button
-                  variant="ghost"
-                  size="icon"
+                  variant="ghost" size="icon"
                   className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
                   onClick={() => setRevokeId(pat.id)}
                 >
@@ -179,7 +188,6 @@ export default function SettingsPage() {
               Токен будет показан <strong>один раз</strong> — сохраните его в Shortcuts сразу после создания.
             </DialogDescription>
           </DialogHeader>
-
           {!newToken ? (
             <div className="space-y-4 pt-1">
               <div className="space-y-1.5">
@@ -191,11 +199,7 @@ export default function SettingsPage() {
                   onKeyDown={e => e.key === "Enter" && handleCreate()}
                 />
               </div>
-              <Button
-                className="w-full"
-                onClick={handleCreate}
-                disabled={createMutation.isPending}
-              >
+              <Button className="w-full" onClick={handleCreate} disabled={createMutation.isPending}>
                 {createMutation.isPending ? "Создаётся…" : "Создать"}
               </Button>
             </div>
@@ -209,12 +213,7 @@ export default function SettingsPage() {
                   <code className="flex-1 text-xs bg-background border border-border rounded px-2 py-2 break-all select-all font-mono">
                     {newToken}
                   </code>
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="h-8 w-8 flex-shrink-0"
-                    onClick={() => copyToken(newToken)}
-                  >
+                  <Button size="icon" variant="outline" className="h-8 w-8 flex-shrink-0" onClick={() => copyToken(newToken)}>
                     {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                   </Button>
                 </div>
@@ -222,9 +221,7 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground">
                 Вставьте этот токен в переменную <code className="bg-muted px-1 rounded">PAT</code> вашего Shortcut.
               </p>
-              <Button className="w-full" onClick={handleCloseNewToken}>
-                Готово
-              </Button>
+              <Button className="w-full" onClick={handleCloseNewToken}>Готово</Button>
             </div>
           )}
         </DialogContent>
