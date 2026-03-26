@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import { GripVertical, Plus, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,6 @@ import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogDescription
 } from "@/components/ui/dialog";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel,
-  AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
-} from "@/components/ui/alert-dialog";
 
 interface Category {
   id: number;
@@ -32,33 +27,28 @@ const COLOR_OPTIONS = [
   "#3BB273", "#F18F01",
 ];
 
-// ─── Drag-and-drop section ───────────────────────────────────────────────────
+// ─── useDragSort hook ──────────────────────────────────────────────────────
 
-function useDragSort(
-  initial: Category[],
-  onCommit: (order: number[]) => void
-) {
+function useDragSort(initial: Category[], onCommit: (order: number[]) => void) {
   const [items, setItems] = useState<Category[]>(initial);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const pointerStartY = useRef(0);
-  const itemHeight = useRef(0);
+  const itemHeightRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // sync when server data changes (add/remove/rename)
-  const prevIds = useRef(initial.map(c => c.id).join(","));
-  const curIds = initial.map(c => c.id).join(",");
-  if (curIds !== prevIds.current) {
-    prevIds.current = curIds;
+  const prevKey = useRef(initial.map(c => `${c.id}:${c.name}:${c.color}`).join(","));
+  const curKey = initial.map(c => `${c.id}:${c.name}:${c.color}`).join(",");
+  if (curKey !== prevKey.current) {
+    prevKey.current = curKey;
     setItems(initial);
   }
 
   const onPointerDown = useCallback((e: React.PointerEvent, id: number) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     pointerStartY.current = e.clientY;
-    // measure item height from list
     if (listRef.current) {
       const first = listRef.current.children[0] as HTMLElement;
-      if (first) itemHeight.current = first.getBoundingClientRect().height + 8; // gap-2 = 8px
+      if (first) itemHeightRef.current = first.getBoundingClientRect().height + 8;
     }
     setDraggingId(id);
   }, []);
@@ -66,9 +56,8 @@ function useDragSort(
   const onPointerMove = useCallback((e: React.PointerEvent, id: number) => {
     if (draggingId !== id) return;
     const dy = e.clientY - pointerStartY.current;
-    const steps = Math.round(dy / (itemHeight.current || 60));
+    const steps = Math.round(dy / (itemHeightRef.current || 60));
     if (steps === 0) return;
-
     setItems(prev => {
       const idx = prev.findIndex(c => c.id === id);
       if (idx === -1) return prev;
@@ -84,10 +73,7 @@ function useDragSort(
 
   const onPointerUp = useCallback(() => {
     if (draggingId !== null) {
-      setItems(prev => {
-        onCommit(prev.map(c => c.id));
-        return prev;
-      });
+      setItems(prev => { onCommit(prev.map(c => c.id)); return prev; });
     }
     setDraggingId(null);
   }, [draggingId, onCommit]);
@@ -95,7 +81,64 @@ function useDragSort(
   return { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp };
 }
 
-// ─── Single item ─────────────────────────────────────────────────────────────
+// ─── SwipeToDelete wrapper ───────────────────────────────────────────────
+
+const DELETE_THRESHOLD = 80;
+
+function SwipeToDelete({
+  canDelete,
+  onDelete,
+  children,
+}: {
+  canDelete: boolean;
+  onDelete: () => void;
+  children: React.ReactNode;
+}) {
+  const x = useMotionValue(0);
+  const deleteOpacity = useTransform(x, [-DELETE_THRESHOLD, -DELETE_THRESHOLD / 2], [1, 0]);
+  const deleteScale = useTransform(x, [-DELETE_THRESHOLD, -DELETE_THRESHOLD / 2], [1, 0.7]);
+  const cardOpacity = useTransform(x, [-DELETE_THRESHOLD * 1.5, -DELETE_THRESHOLD], [0, 1]);
+
+  const handleDragEnd = () => {
+    if (x.get() < -DELETE_THRESHOLD) {
+      onDelete();
+    } else {
+      // snap back
+      x.set(0);
+    }
+  };
+
+  if (!canDelete) return <>{children}</>;
+
+  return (
+    <div className="relative overflow-hidden rounded-xl">
+      {/* Red background with trash icon */}
+      <motion.div
+        className="absolute inset-0 bg-destructive rounded-xl flex items-center justify-end pr-4"
+        style={{ opacity: deleteOpacity }}
+      >
+        <motion.div style={{ scale: deleteScale }}>
+          <Trash2 size={20} className="text-white" />
+        </motion.div>
+      </motion.div>
+
+      {/* Draggable card */}
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: -DELETE_THRESHOLD * 1.6, right: 0 }}
+        dragElastic={{ left: 0.15, right: 0 }}
+        style={{ x, opacity: cardOpacity }}
+        onDragEnd={handleDragEnd}
+        dragMomentum={false}
+        className="relative cursor-grab active:cursor-grabbing"
+      >
+        {children}
+      </motion.div>
+    </div>
+  );
+}
+
+// ─── CategoryItem ───────────────────────────────────────────────────────────
 
 function CategoryItem({
   cat,
@@ -110,24 +153,25 @@ function CategoryItem({
   isDragging: boolean;
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
+  onPointerUp: () => void;
   onEdit: (cat: Category) => void;
   onDelete: (cat: Category) => void;
 }) {
   return (
     <motion.div
       layout
+      layoutId={`cat-${cat.id}`}
       transition={{ type: "spring", stiffness: 500, damping: 40 }}
       animate={{
         scale: isDragging ? 1.03 : 1,
         boxShadow: isDragging
-          ? "0 8px 24px rgba(0,0,0,0.15)"
+          ? "0 12px 32px rgba(0,0,0,0.18)"
           : "0 1px 3px rgba(0,0,0,0.06)",
-        zIndex: isDragging ? 50 : 0,
       }}
+      style={{ zIndex: isDragging ? 50 : "auto", position: "relative" }}
       className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none"
     >
-      {/* Drag handle — единственная зона перетаскивания */}
+      {/* Drag handle */}
       <div
         className="touch-none cursor-grab active:cursor-grabbing p-1 -ml-1 flex-shrink-0"
         style={{ touchAction: "none" }}
@@ -136,7 +180,7 @@ function CategoryItem({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        <GripVertical size={16} className="text-muted-foreground/50" />
+        <GripVertical size={16} className="text-muted-foreground/40" />
       </div>
 
       <div
@@ -149,28 +193,19 @@ function CategoryItem({
       <span className="flex-1 text-sm font-medium truncate">{cat.name}</span>
 
       {!cat.isDefault && (
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost" size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={() => onEdit(cat)}
-          >
-            <Pencil size={13} />
-          </Button>
-          <Button
-            variant="ghost" size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            onClick={() => onDelete(cat)}
-          >
-            <Trash2 size={13} />
-          </Button>
-        </div>
+        <Button
+          variant="ghost" size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-foreground flex-shrink-0"
+          onClick={() => onEdit(cat)}
+        >
+          <Pencil size={13} />
+        </Button>
       )}
     </motion.div>
   );
 }
 
-// ─── Section ─────────────────────────────────────────────────────────────────
+// ─── CategorySection ─────────────────────────────────────────────────────
 
 function CategorySection({
   title, type, categories, onReorder, onEdit, onDelete, onAdd,
@@ -180,14 +215,10 @@ function CategorySection({
   categories: Category[];
   onReorder: (type: "income" | "expense", order: number[]) => void;
   onEdit: (cat: Category) => void;
-  onDelete: (cat: Category) => void;
+  onDelete: (id: number) => void;
   onAdd: (type: "income" | "expense") => void;
 }) {
-  const commit = useCallback(
-    (order: number[]) => onReorder(type, order),
-    [type, onReorder]
-  );
-
+  const commit = useCallback((order: number[]) => onReorder(type, order), [type, onReorder]);
   const { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp } =
     useDragSort(categories, commit);
 
@@ -205,22 +236,35 @@ function CategorySection({
           Нет категорий
         </div>
       ) : (
-        <div ref={listRef} className="flex flex-col gap-2">
+        <motion.div ref={listRef} className="flex flex-col gap-2" layout>
           <AnimatePresence initial={false}>
             {items.map(cat => (
-              <CategoryItem
+              <motion.div
                 key={cat.id}
-                cat={cat}
-                isDragging={draggingId === cat.id}
-                onPointerDown={(e) => onPointerDown(e, cat.id)}
-                onPointerMove={(e) => onPointerMove(e, cat.id)}
-                onPointerUp={onPointerUp}
-                onEdit={onEdit}
-                onDelete={onDelete}
-              />
+                layout
+                initial={{ opacity: 0, scale: 0.92, y: -8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.88, x: -60, transition: { duration: 0.25, ease: [0.4, 0, 0.2, 1] } }}
+                transition={{ type: "spring", stiffness: 500, damping: 40 }}
+              >
+                <SwipeToDelete
+                  canDelete={!cat.isDefault}
+                  onDelete={() => onDelete(cat.id)}
+                >
+                  <CategoryItem
+                    cat={cat}
+                    isDragging={draggingId === cat.id}
+                    onPointerDown={(e) => onPointerDown(e, cat.id)}
+                    onPointerMove={(e) => onPointerMove(e, cat.id)}
+                    onPointerUp={onPointerUp}
+                    onEdit={onEdit}
+                    onDelete={() => onDelete(cat.id)}
+                  />
+                </SwipeToDelete>
+              </motion.div>
             ))}
           </AnimatePresence>
-        </div>
+        </motion.div>
       )}
     </div>
   );
@@ -240,8 +284,6 @@ export default function CategoryManager() {
   const [editCat, setEditCat] = useState<Category | null>(null);
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
-
-  const [deleteCat, setDeleteCat] = useState<Category | null>(null);
 
   const { data: categories = [], isLoading } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
@@ -286,7 +328,6 @@ export default function CategoryManager() {
     onSuccess: () => {
       toast({ title: "Категория удалена" });
       qc.invalidateQueries({ queryKey: ["/api/categories"] });
-      setDeleteCat(null);
     },
     onError: () => toast({ title: "Ошибка удаления", variant: "destructive" }),
   });
@@ -310,7 +351,7 @@ export default function CategoryManager() {
         categories={incomeCategories}
         onReorder={(type, order) => reorderMutation.mutate({ type, order })}
         onEdit={(cat) => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
-        onDelete={setDeleteCat}
+        onDelete={(id) => deleteMutation.mutate(id)}
         onAdd={(t) => { setAddType(t); setAddOpen(true); }}
       />
       <CategorySection
@@ -319,7 +360,7 @@ export default function CategoryManager() {
         categories={expenseCategories}
         onReorder={(type, order) => reorderMutation.mutate({ type, order })}
         onEdit={(cat) => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
-        onDelete={setDeleteCat}
+        onDelete={(id) => deleteMutation.mutate(id)}
         onAdd={(t) => { setAddType(t); setAddOpen(true); }}
       />
 
@@ -406,27 +447,6 @@ export default function CategoryManager() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* ALERT: DELETE */}
-      <AlertDialog open={!!deleteCat} onOpenChange={(o) => { if (!o) setDeleteCat(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить категорию?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Категория «{deleteCat?.name}» будет удалена. Транзакции сохранятся.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90"
-              onClick={() => deleteCat && deleteMutation.mutate(deleteCat.id)}
-            >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
