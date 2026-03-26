@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, boolean, jsonb, serial, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, boolean, jsonb, serial, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -66,8 +66,10 @@ export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
 export type InsertPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
 
 // ─── ACCOUNTS (debit / credit / cash / other) ──────────────────────────────
-// Имя счёта уникально в рамках одного пользователя (uniqueIndex на userId+name).
-// Это позволяет внешним клиентам (iOS Shortcuts) передавать accountName вместо accountId.
+// Имя счёта уникально среди активных счётов пользователя.
+// Уникальность проверяется на уровне приложения в routes.ts (POST/PATCH /api/accounts).
+// Это позволяет архивированным счётам сохранять старые имена без конфликтов,
+// а внешним клиентам (iOS Shortcuts) — передавать accountName вместо accountId.
 
 export const accounts = pgTable("accounts", {
   id:             serial("id").primaryKey(),
@@ -86,7 +88,8 @@ export const accounts = pgTable("accounts", {
   gracePeriodDays: integer("grace_period_days"),
   createdAt:      text("created_at").notNull().default(""),
 }, (t) => ({
-  userNameUnique: uniqueIndex("accounts_user_name_unique").on(t.userId, t.name),
+  // Обычный индекс для быстрого поиска по имени (используется при резолвинге accountName→id)
+  userNameIdx: index("accounts_user_name_idx").on(t.userId, t.name),
 }));
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true });
