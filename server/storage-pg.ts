@@ -4,7 +4,7 @@
  * plus extended methods for users, accounts, notifications, etc.
  */
 
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, asc } from "drizzle-orm";
 import { db } from "./db";
 import * as S from "@shared/schema";
 import { format } from "date-fns";
@@ -166,18 +166,18 @@ const DEFAULT_LESSONS: S.InsertLesson[] = [
 // ─── DEFAULT CATEGORIES SEED ────────────────────────────────────────────────
 
 const DEFAULT_CATEGORIES = [
-  { name: "Зарплата", type: "income", icon: "Briefcase", color: "#437A22", isDefault: true },
-  { name: "Фриланс", type: "income", icon: "Laptop", color: "#20808D", isDefault: true },
-  { name: "Прочие доходы", type: "income", icon: "DollarSign", color: "#006494", isDefault: true },
-  { name: "Еда", type: "expense", icon: "UtensilsCrossed", color: "#20808D", isDefault: true },
-  { name: "Транспорт", type: "expense", icon: "Car", color: "#A84B2F", isDefault: true },
-  { name: "Развлечения", type: "expense", icon: "Gamepad2", color: "#7A39BB", isDefault: true },
-  { name: "Подписки", type: "expense", icon: "Tv", color: "#D19900", isDefault: true },
-  { name: "Спорт", type: "expense", icon: "Dumbbell", color: "#437A22", isDefault: true },
-  { name: "ЖКХ", type: "expense", icon: "Home", color: "#006494", isDefault: true },
-  { name: "Образование", type: "expense", icon: "BookOpen", color: "#944454", isDefault: true },
-  { name: "Здоровье", type: "expense", icon: "Heart", color: "#A84B2F", isDefault: true },
-  { name: "Одежда", type: "expense", icon: "Shirt", color: "#848456", isDefault: true },
+  { name: "Зарплата",      type: "income",  icon: "Briefcase",      color: "#437A22", isDefault: true, sortOrder: 0 },
+  { name: "Фриланс",       type: "income",  icon: "Laptop",         color: "#20808D", isDefault: true, sortOrder: 1 },
+  { name: "Прочие доходы", type: "income",  icon: "DollarSign",     color: "#006494", isDefault: true, sortOrder: 2 },
+  { name: "Еда",           type: "expense", icon: "UtensilsCrossed", color: "#20808D", isDefault: true, sortOrder: 0 },
+  { name: "Транспорт",     type: "expense", icon: "Car",            color: "#A84B2F", isDefault: true, sortOrder: 1 },
+  { name: "Развлечения",   type: "expense", icon: "Gamepad2",       color: "#7A39BB", isDefault: true, sortOrder: 2 },
+  { name: "Подписки",      type: "expense", icon: "Tv",             color: "#D19900", isDefault: true, sortOrder: 3 },
+  { name: "Спорт",         type: "expense", icon: "Dumbbell",       color: "#437A22", isDefault: true, sortOrder: 4 },
+  { name: "ЖКХ",           type: "expense", icon: "Home",           color: "#006494", isDefault: true, sortOrder: 5 },
+  { name: "Образование",   type: "expense", icon: "BookOpen",       color: "#944454", isDefault: true, sortOrder: 6 },
+  { name: "Здоровье",      type: "expense", icon: "Heart",          color: "#A84B2F", isDefault: true, sortOrder: 7 },
+  { name: "Одежда",        type: "expense", icon: "Shirt",          color: "#848456", isDefault: true, sortOrder: 8 },
 ];
 
 // ─── PG STORAGE CLASS ────────────────────────────────────────────────────────
@@ -399,12 +399,62 @@ export class PgStorage {
 
   async getCategories(userId: number): Promise<S.Category[]> {
     return db.select().from(S.categories)
-      .where(eq(S.categories.userId, userId));
+      .where(eq(S.categories.userId, userId))
+      .orderBy(asc(S.categories.sortOrder), asc(S.categories.id));
   }
 
+  /** Создаёт новую категорию, автоматически назначая следующий sortOrder. */
   async addCategory(userId: number, data: Omit<S.InsertCategory, "userId">): Promise<S.Category> {
-    const [cat] = await db.insert(S.categories).values({ ...cat, userId }).returning();
+    const rows = await db.select({ maxOrder: sql<number>`coalesce(max(sort_order), -1)` })
+      .from(S.categories)
+      .where(and(eq(S.categories.userId, userId), eq(S.categories.type, data.type as string)));
+    const nextOrder = (rows[0]?.maxOrder ?? -1) + 1;
+    const [cat] = await db.insert(S.categories)
+      .values({ ...data, userId, sortOrder: nextOrder })
+      .returning();
     return cat;
+  }
+
+  /** Обновляет поля категории (name, icon, color). */
+  async updateCategory(
+    id: number,
+    userId: number,
+    data: Partial<Pick<S.InsertCategory, "name" | "icon" | "color">>
+  ): Promise<S.Category> {
+    const [cat] = await db.update(S.categories)
+      .set(data)
+      .where(and(eq(S.categories.id, id), eq(S.categories.userId, userId)))
+      .returning();
+    if (!cat) throw new Error("Category not found");
+    return cat;
+  }
+
+  /** Удаляет категорию пользователя. Транзакции с этой категорией сохраняются (categoryId → null). */
+  async deleteCategory(id: number, userId: number): Promise<void> {
+    await db.delete(S.categories)
+      .where(and(eq(S.categories.id, id), eq(S.categories.userId, userId)));
+  }
+
+  /**
+   * Переставляет порядок категорий одного типа.
+   * @param newOrder — массив id категорий в новом порядке (от первого к последнему).
+   */
+  async reorderCategories(
+    userId: number,
+    type: "income" | "expense",
+    newOrder: number[]
+  ): Promise<void> {
+    for (let i = 0; i < newOrder.length; i++) {
+      await db.update(S.categories)
+        .set({ sortOrder: i })
+        .where(
+          and(
+            eq(S.categories.id, newOrder[i]),
+            eq(S.categories.userId, userId),
+            eq(S.categories.type, type)
+          )
+        );
+    }
   }
 
   // ── LESSONS ───────────────────────────────────────────────────────────────
