@@ -37,19 +37,6 @@ export const widgetAuthCodes = pgTable("widget_auth_codes", {
 export type WidgetAuthCode = typeof widgetAuthCodes.$inferSelect;
 
 // ─── PERSONAL ACCESS TOKENS (PAT) ───────────────────────────────────────────
-//
-// Для внешних клиентов: iOS Shortcuts, Scriptable, сторонние интеграции.
-// Браузер использует httpOnly cookie (JWT), внешние клиенты — Bearer PAT.
-//
-// Формат токена: finwise_pat_<64 hex символа>
-// Заголовок:     Authorization: Bearer finwise_pat_xxxxxxxx...
-//
-// Жизненный цикл:
-//   - Создаётся через POST /api/pat/create (требует cookie-сессии)
-//   - Действует 30 дней от момента создания
-//   - Может быть отозван через DELETE /api/pat/:id
-//   - Мягкое удаление: revokedAt != null → токен отклоняется
-//   - lastUsedAt обновляется при каждом успешном запросе (аудит)
 
 export const personalAccessTokens = pgTable("personal_access_tokens", {
   id:         serial("id").primaryKey(),
@@ -66,10 +53,6 @@ export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
 export type InsertPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
 
 // ─── ACCOUNTS (debit / credit / cash / other) ──────────────────────────────
-// Имя счёта уникально среди активных счётов пользователя.
-// Уникальность проверяется на уровне приложения в routes.ts (POST/PATCH /api/accounts).
-// Это позволяет архивированным счётам сохранять старые имена без конфликтов,
-// а внешним клиентам (iOS Shortcuts) — передавать accountName вместо accountId.
 
 export const accounts = pgTable("accounts", {
   id:             serial("id").primaryKey(),
@@ -88,7 +71,6 @@ export const accounts = pgTable("accounts", {
   gracePeriodDays: integer("grace_period_days"),
   createdAt:      text("created_at").notNull().default(""),
 }, (t) => ({
-  // Обычный индекс для быстрого поиска по имени (используется при резолвинге accountName→id)
   userNameIdx: index("accounts_user_name_idx").on(t.userId, t.name),
 }));
 
@@ -106,6 +88,7 @@ export const categories = pgTable("categories", {
   icon:      text("icon").notNull().default("Tag"),
   color:     text("color").notNull().default("#20808D"),
   isDefault: boolean("is_default").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
