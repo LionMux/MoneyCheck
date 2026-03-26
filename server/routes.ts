@@ -35,6 +35,17 @@ function getUserId(req: AuthRequest): number {
   return req.userId ?? 1;
 }
 
+/** Зеркало resolveType из Transactions.tsx — работает и для внешних клиентов (Shortcuts, PAT) */
+function resolveTransactionType(
+  rawType: string,
+  accountType?: string
+): string {
+  if (accountType !== "credit") return rawType;
+  if (rawType === "expense") return "creditPurchase";
+  if (rawType === "income")  return "creditPayment";
+  return rawType; // creditPurchase / creditPayment переданы явно — не трогаем
+}
+
 export async function registerRoutes(httpServer: Server, app: Express) {
   const cookieParser = (await import("cookie-parser")).default;
   app.use(cookieParser());
@@ -276,6 +287,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       // Резолвинг accountName → accountId для внешних клиентов (iOS Shortcuts и др.)
       // Если передан accountName (строка) вместо accountId — ищем счёт по имени
+      let resolvedAccountType: string | undefined;
       if (body.accountName && !body.accountId) {
         const userAccounts = await pg.getAccounts(userId);
         const found = userAccounts.find(
@@ -287,8 +299,25 @@ export async function registerRoutes(httpServer: Server, app: Express) {
           });
         }
         body.accountId = found.id;
+        resolvedAccountType = found.type;
+      } else if (body.accountId) {
+        // accountId передан напрямую — узнаём тип счёта для resolveType
+        const userAccounts = await pg.getAccounts(userId);
+        const found = userAccounts.find((a) => a.id === Number(body.accountId));
+        resolvedAccountType = found?.type;
       }
       delete body.accountName;
+
+      // Автоконвертация типа: expense→creditPurchase / income→creditPayment для кредитных счётов.
+      // Зеркалит логику resolveType() из Transactions.tsx — теперь работает и для внешних клиентов.
+      body.type = resolveTransactionType(body.type, resolvedAccountType);
+
+      // Нормализация суммы: creditPurchase всегда отрицательный, creditPayment — положительный
+      if (body.type === "creditPurchase") {
+        body.amount = -Math.abs(Number(body.amount));
+      } else if (body.type === "creditPayment") {
+        body.amount = Math.abs(Number(body.amount));
+      }
 
       const parsed = insertTransactionSchema.safeParse(body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error });
