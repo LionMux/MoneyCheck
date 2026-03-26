@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
 
 config({ path: path.join(ROOT_DIR, '.env') });
+console.log("TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "✅ " + 
+  process.env.TELEGRAM_BOT_TOKEN.slice(0, 10) + "..." : "❌ пустой");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const ADMIN_ID = Number(process.env.TELEGRAM_ADMIN_ID!);
