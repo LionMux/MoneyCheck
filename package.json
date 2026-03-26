@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "rebuild": "git pull --rebase && npm run db:push && tsx script/build.ts && pm2 restart moneycheck"
+    "rebuild": "git pull origin main && npm run db:push && tsx script/build.ts && pm2 restart moneycheck"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
