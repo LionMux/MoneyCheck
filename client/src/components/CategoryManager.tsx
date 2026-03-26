@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Reorder, useDragControls } from "framer-motion";
 import {
-  GripVertical, Plus, Trash2, Pencil, Check, X, Tag
+  GripVertical, Plus, Trash2, Pencil
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,53 +28,50 @@ interface Category {
   sortOrder: number;
 }
 
-const ICON_OPTIONS = [
-  "Tag", "ShoppingCart", "Car", "Home", "Heart", "Briefcase",
-  "Coffee", "Gamepad2", "Dumbbell", "BookOpen", "Shirt", "Plane",
-  "Gift", "Music", "UtensilsCrossed", "Tv", "Zap", "DollarSign",
-  "Laptop", "Shield", "TrendingUp", "Receipt",
-];
-
 const COLOR_OPTIONS = [
   "#20808D", "#437A22", "#A84B2F", "#7A39BB", "#D19900",
   "#006494", "#944454", "#848456", "#2E86AB", "#E84855",
   "#3BB273", "#F18F01",
 ];
 
-interface DraggableTileProps {
+function CategoryItem({
+  cat,
+  onEdit,
+  onDelete,
+}: {
   cat: Category;
-  index: number;
-  onDragStart: (index: number) => void;
-  onDragOver: (index: number) => void;
-  onDragEnd: () => void;
-  draggingIndex: number | null;
   onEdit: (cat: Category) => void;
   onDelete: (cat: Category) => void;
-}
+}) {
+  const controls = useDragControls();
 
-function CategoryTile({ cat, index, onDragStart, onDragOver, onDragEnd, draggingIndex, onEdit, onDelete }: DraggableTileProps) {
-  const isDragging = draggingIndex === index;
   return (
-    <div
-      draggable
-      onDragStart={() => onDragStart(index)}
-      onDragOver={(e) => { e.preventDefault(); onDragOver(index); }}
-      onDragEnd={onDragEnd}
-      className={`flex items-center gap-3 p-3 rounded-xl border bg-card shadow-sm transition-all duration-150 cursor-grab active:cursor-grabbing select-none
-        ${
-          isDragging
-            ? "opacity-40 scale-95 border-primary/40 shadow-none"
-            : "border-border hover:border-primary/30 hover:shadow-md"
-        }`}
+    <Reorder.Item
+      value={cat}
+      dragListener={false}
+      dragControls={controls}
+      className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card shadow-sm select-none touch-none"
+      whileDrag={{ scale: 1.03, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50 }}
+      layout
+      transition={{ type: "spring", stiffness: 400, damping: 30 }}
     >
-      <GripVertical size={16} className="text-muted-foreground/50 flex-shrink-0" />
+      {/* Drag handle — единственная зона для перетаскивания */}
       <div
-        className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm"
+        className="cursor-grab active:cursor-grabbing touch-none p-1 -ml-1 flex-shrink-0"
+        onPointerDown={(e) => controls.start(e)}
+      >
+        <GripVertical size={16} className="text-muted-foreground/50" />
+      </div>
+
+      <div
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
         style={{ backgroundColor: cat.color }}
       >
         {cat.name.slice(0, 1).toUpperCase()}
       </div>
+
       <span className="flex-1 text-sm font-medium truncate">{cat.name}</span>
+
       {!cat.isDefault && (
         <div className="flex items-center gap-1">
           <Button
@@ -92,46 +90,39 @@ function CategoryTile({ cat, index, onDragStart, onDragOver, onDragEnd, dragging
           </Button>
         </div>
       )}
-    </div>
+    </Reorder.Item>
   );
 }
 
-interface SectionProps {
+function CategorySection({
+  title,
+  type,
+  categories,
+  onReorder,
+  onEdit,
+  onDelete,
+  onAdd,
+}: {
   title: string;
   type: "income" | "expense";
   categories: Category[];
-  onReorder: (type: "income" | "expense", newOrder: number[]) => void;
+  onReorder: (type: "income" | "expense", order: number[]) => void;
   onEdit: (cat: Category) => void;
   onDelete: (cat: Category) => void;
   onAdd: (type: "income" | "expense") => void;
-}
+}) {
+  const [items, setItems] = useState<Category[]>(categories);
 
-function CategorySection({ title, type, categories, onReorder, onEdit, onDelete, onAdd }: SectionProps) {
-  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const [localOrder, setLocalOrder] = useState<Category[] | null>(null);
+  // sync when server data updates
+  if (
+    categories.length !== items.length ||
+    categories.some((c, i) => c.id !== items[i]?.id || c.name !== items[i]?.name || c.color !== items[i]?.color)
+  ) {
+    setItems(categories);
+  }
 
-  const displayed = localOrder ?? categories;
-
-  const handleDragStart = (index: number) => {
-    setDraggingIndex(index);
-    setLocalOrder([...displayed]);
-  };
-
-  const handleDragOver = (overIndex: number) => {
-    if (draggingIndex === null || draggingIndex === overIndex) return;
-    const updated = [...(localOrder ?? categories)];
-    const [moved] = updated.splice(draggingIndex, 1);
-    updated.splice(overIndex, 0, moved);
-    setLocalOrder(updated);
-    setDraggingIndex(overIndex);
-  };
-
-  const handleDragEnd = () => {
-    if (localOrder) {
-      onReorder(type, localOrder.map(c => c.id));
-    }
-    setDraggingIndex(null);
-    setLocalOrder(null);
+  const handleReorderEnd = () => {
+    onReorder(type, items.map(c => c.id));
   };
 
   return (
@@ -142,26 +133,32 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
           <Plus size={13} /> Добавить
         </Button>
       </div>
-      <div className="space-y-2">
-        {displayed.length === 0 && (
-          <div className="text-xs text-muted-foreground text-center py-4 rounded-xl border border-dashed border-border">
-            Нет категорий
-          </div>
-        )}
-        {displayed.map((cat, index) => (
-          <CategoryTile
-            key={cat.id}
-            cat={cat}
-            index={index}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            draggingIndex={draggingIndex}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        ))}
-      </div>
+
+      {items.length === 0 ? (
+        <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">
+          Нет категорий
+        </div>
+      ) : (
+        <Reorder.Group
+          axis="y"
+          values={items}
+          onReorder={setItems}
+          className="space-y-2"
+          as="div"
+        >
+          {items.map(cat => (
+            <CategoryItem
+              key={cat.id}
+              cat={cat}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+        </Reorder.Group>
+      )}
+
+      {/* invisible drop zone to trigger save */}
+      <div onPointerUp={handleReorderEnd} className="h-0" />
     </div>
   );
 }
@@ -174,7 +171,6 @@ export default function CategoryManager() {
   const [addType, setAddType] = useState<"income" | "expense">("expense");
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(COLOR_OPTIONS[0]);
-  const [newIcon, setNewIcon] = useState(ICON_OPTIONS[0]);
 
   const [editCat, setEditCat] = useState<Category | null>(null);
   const [editName, setEditName] = useState("");
@@ -186,8 +182,8 @@ export default function CategoryManager() {
     queryKey: ["/api/categories"],
   });
 
-  const incomeCategories = categories.filter(c => c.type === "income");
-  const expenseCategories = categories.filter(c => c.type === "expense");
+  const incomeCategories = [...categories.filter(c => c.type === "income")].sort((a, b) => a.sortOrder - b.sortOrder);
+  const expenseCategories = [...categories.filter(c => c.type === "expense")].sort((a, b) => a.sortOrder - b.sortOrder);
 
   const addMutation = useMutation({
     mutationFn: async (data: { name: string; type: string; icon: string; color: string }) => {
@@ -232,29 +228,11 @@ export default function CategoryManager() {
     mutationFn: async ({ type, order }: { type: "income" | "expense"; order: number[] }) => {
       await apiRequest("PATCH", "/api/categories/reorder", { type, order });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/categories"] });
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/categories"] }),
   });
 
-  const handleAdd = () => {
-    if (!newName.trim()) return;
-    addMutation.mutate({ name: newName.trim(), type: addType, icon: newIcon, color: newColor });
-  };
-
-  const handleEdit = (cat: Category) => {
-    setEditCat(cat);
-    setEditName(cat.name);
-    setEditColor(cat.color);
-  };
-
-  const handleEditSave = () => {
-    if (!editCat) return;
-    editMutation.mutate({ id: editCat.id, data: { name: editName, color: editColor } });
-  };
-
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground py-6 text-center">Загрузка категорий…</div>;
+    return <div className="text-sm text-muted-foreground py-6 text-center">Загрузка…</div>;
   }
 
   return (
@@ -264,7 +242,7 @@ export default function CategoryManager() {
         type="income"
         categories={incomeCategories}
         onReorder={(type, order) => reorderMutation.mutate({ type, order })}
-        onEdit={handleEdit}
+        onEdit={(cat) => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
         onDelete={setDeleteCat}
         onAdd={(t) => { setAddType(t); setAddOpen(true); }}
       />
@@ -273,7 +251,7 @@ export default function CategoryManager() {
         type="expense"
         categories={expenseCategories}
         onReorder={(type, order) => reorderMutation.mutate({ type, order })}
-        onEdit={handleEdit}
+        onEdit={(cat) => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
         onDelete={setDeleteCat}
         onAdd={(t) => { setAddType(t); setAddOpen(true); }}
       />
@@ -294,7 +272,7 @@ export default function CategoryManager() {
                 placeholder="Например: Кафе, Аренда…"
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleAdd()}
+                onKeyDown={e => e.key === "Enter" && addMutation.mutate({ name: newName.trim(), type: addType, icon: "Tag", color: newColor })}
                 autoFocus
               />
             </div>
@@ -303,8 +281,7 @@ export default function CategoryManager() {
               <div className="flex flex-wrap gap-2">
                 {COLOR_OPTIONS.map(c => (
                   <button
-                    key={c}
-                    type="button"
+                    key={c} type="button"
                     onClick={() => setNewColor(c)}
                     className={`w-7 h-7 rounded-full border-2 transition-transform ${
                       newColor === c ? "border-foreground scale-110" : "border-transparent"
@@ -316,7 +293,7 @@ export default function CategoryManager() {
             </div>
             <Button
               className="w-full"
-              onClick={handleAdd}
+              onClick={() => addMutation.mutate({ name: newName.trim(), type: addType, icon: "Tag", color: newColor })}
               disabled={!newName.trim() || addMutation.isPending}
             >
               {addMutation.isPending ? "Создаётся…" : "Создать"}
@@ -337,7 +314,7 @@ export default function CategoryManager() {
               <Input
                 value={editName}
                 onChange={e => setEditName(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleEditSave()}
+                onKeyDown={e => e.key === "Enter" && editMutation.mutate({ id: editCat!.id, data: { name: editName, color: editColor } })}
                 autoFocus
               />
             </div>
@@ -346,8 +323,7 @@ export default function CategoryManager() {
               <div className="flex flex-wrap gap-2">
                 {COLOR_OPTIONS.map(c => (
                   <button
-                    key={c}
-                    type="button"
+                    key={c} type="button"
                     onClick={() => setEditColor(c)}
                     className={`w-7 h-7 rounded-full border-2 transition-transform ${
                       editColor === c ? "border-foreground scale-110" : "border-transparent"
@@ -359,7 +335,7 @@ export default function CategoryManager() {
             </div>
             <Button
               className="w-full"
-              onClick={handleEditSave}
+              onClick={() => editMutation.mutate({ id: editCat!.id, data: { name: editName, color: editColor } })}
               disabled={!editName.trim() || editMutation.isPending}
             >
               {editMutation.isPending ? "Сохраняется…" : "Сохранить"}

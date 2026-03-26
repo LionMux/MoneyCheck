@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogDescription
@@ -87,97 +88,96 @@ export default function SettingsPage() {
   const handleCloseNewToken = () => { setNewToken(null); setCreateOpen(false); };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-10">
+    <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Настройки</h1>
         <p className="text-muted-foreground text-sm mt-1">Управление аккаунтом и интеграциями</p>
       </div>
 
-      {/* CATEGORIES SECTION */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <LayoutGrid size={18} className="text-primary" />
-          <h2 className="text-base font-semibold">Категории</h2>
-        </div>
-        <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
-          <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
-          <span>
-            Перетащите категории чтобы изменить порядок. Стандартные категории нельзя удалить, но можно переименовать.
-          </span>
-        </div>
-        <CategoryManager />
-      </section>
+      <Tabs defaultValue="categories">
+        <TabsList className="w-full">
+          <TabsTrigger value="categories" className="flex-1 gap-2">
+            <LayoutGrid size={15} />
+            Категории
+          </TabsTrigger>
+          <TabsTrigger value="tokens" className="flex-1 gap-2">
+            <Key size={15} />
+            API-токены
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="border-t border-border" />
-
-      {/* PAT SECTION */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Key size={18} className="text-primary" />
-            <h2 className="text-base font-semibold">API-токены (PAT)</h2>
+        {/* ── TAB: CATEGORIES ── */}
+        <TabsContent value="categories" className="mt-6 space-y-4">
+          <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
+            <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
+            <span>
+              Зажмите значок ☰ и перетащите категорию, чтобы изменить порядок.{" "}
+              Стандартные категории нельзя удалить, но можно переименовать.
+            </span>
           </div>
-          <Button
-            size="sm"
-            onClick={() => { setCreateOpen(true); setNewToken(null); }}
-            className="gap-1.5"
-          >
-            <Plus size={15} />
-            Создать токен
-          </Button>
-        </div>
+          <CategoryManager />
+        </TabsContent>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
-          <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
-          <span>
-            Токены используются для авторизации в <strong>iOS Shortcuts</strong> и <strong>Scriptable</strong>.
-            Заголовок запроса: <code className="bg-muted px-1 rounded text-xs">Authorization: Bearer finwise_pat_xxx</code>
-          </span>
-        </div>
-
-        {isLoading ? (
-          <div className="text-sm text-muted-foreground py-4 text-center">Загрузка…</div>
-        ) : tokens.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border py-10 text-center">
-            <ShieldCheck size={32} className="mx-auto mb-3 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">Токенов нет. Создайте первый для использования в Shortcuts.</p>
+        {/* ── TAB: API TOKENS ── */}
+        <TabsContent value="tokens" className="mt-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground flex-1 mr-3">
+              <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
+              <span>
+                Для авторизации в <strong>iOS Shortcuts</strong> и <strong>Scriptable</strong>.{" "}
+                Заголовок: <code className="bg-muted px-1 rounded text-xs">Authorization: Bearer finwise_pat_xxx</code>
+              </span>
+            </div>
+            <Button size="sm" onClick={() => { setCreateOpen(true); setNewToken(null); }} className="gap-1.5 flex-shrink-0">
+              <Plus size={15} />
+              Создать
+            </Button>
           </div>
-        ) : (
-          <div className="space-y-2">
-            {tokens.map((pat) => (
-              <div
-                key={pat.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
-              >
-                <Terminal size={15} className="text-primary flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{pat.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Создан {formatDate(pat.createdAt)}
-                    {" · "}
-                    {isExpired(pat.expiresAt)
-                      ? <span className="text-destructive">Истёк {formatDate(pat.expiresAt)}</span>
-                      : <span>До {formatDate(pat.expiresAt)}</span>
-                    }
-                    {pat.lastUsedAt && <> · Исп. {formatDate(pat.lastUsedAt)}</>}
-                  </p>
-                </div>
-                {isExpired(pat.expiresAt)
-                  ? <Badge variant="destructive" className="text-[10px]">Истёк</Badge>
-                  : <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/40">Активен</Badge>
-                }
-                <Button
-                  variant="ghost" size="icon"
-                  className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
-                  onClick={() => setRevokeId(pat.id)}
+
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground py-4 text-center">Загрузка…</div>
+          ) : tokens.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border py-10 text-center">
+              <ShieldCheck size={32} className="mx-auto mb-3 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">Токенов нет. Создайте первый для использования в Shortcuts.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {tokens.map((pat) => (
+                <div
+                  key={pat.id}
+                  className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
                 >
-                  <Trash2 size={14} />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+                  <Terminal size={15} className="text-primary flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{pat.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Создан {formatDate(pat.createdAt)}
+                      {" · "}
+                      {isExpired(pat.expiresAt)
+                        ? <span className="text-destructive">Истёк {formatDate(pat.expiresAt)}</span>
+                        : <span>До {formatDate(pat.expiresAt)}</span>
+                      }
+                      {pat.lastUsedAt && <> · Исп. {formatDate(pat.lastUsedAt)}</>}
+                    </p>
+                  </div>
+                  {isExpired(pat.expiresAt)
+                    ? <Badge variant="destructive" className="text-[10px]">Истёк</Badge>
+                    : <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/40">Активен</Badge>
+                  }
+                  <Button
+                    variant="ghost" size="icon"
+                    className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
+                    onClick={() => setRevokeId(pat.id)}
+                  >
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* DIALOG: CREATE TOKEN */}
       <Dialog open={createOpen} onOpenChange={(o) => { if (!o) handleCloseNewToken(); }}>
@@ -185,7 +185,7 @@ export default function SettingsPage() {
           <DialogHeader>
             <DialogTitle>Создать API-токен</DialogTitle>
             <DialogDescription>
-              Токен будет показан <strong>один раз</strong> — сохраните его в Shortcuts сразу после создания.
+              Токен будет показан <strong>один раз</strong> — сохраните его сразу.
             </DialogDescription>
           </DialogHeader>
           {!newToken ? (
@@ -207,7 +207,7 @@ export default function SettingsPage() {
             <div className="space-y-4 pt-1">
               <div className="rounded-lg border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/30 p-3">
                 <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mb-2">
-                  ✅ Токен создан — скопируйте его сейчас. Повторно он не будет показан.
+                  ✅ Токен создан — скопируйте его сейчас.
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-xs bg-background border border-border rounded px-2 py-2 break-all select-all font-mono">
@@ -219,7 +219,7 @@ export default function SettingsPage() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Вставьте этот токен в переменную <code className="bg-muted px-1 rounded">PAT</code> вашего Shortcut.
+                Вставьте токен в переменную <code className="bg-muted px-1 rounded">PAT</code> вашего Shortcut.
               </p>
               <Button className="w-full" onClick={handleCloseNewToken}>Готово</Button>
             </div>
@@ -233,7 +233,7 @@ export default function SettingsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Отозвать токен?</AlertDialogTitle>
             <AlertDialogDescription>
-              Токен перестанет работать немедленно. Shortcuts и виджеты, использующие его, перестанут получать данные.
+              Токен перестанет работать немедленно.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
