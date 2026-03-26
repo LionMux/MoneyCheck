@@ -113,22 +113,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(safe);
   });
 
-  // guard: patOrJwtMiddleware если есть БД (принимает cookie JWT и Bearer PAT),
-  // иначе пропускаем всё для demo-режима без БД
   const guard = pg ? patOrJwtMiddleware : (_req: any, _res: any, next: any) => next();
 
   // ── PERSONAL ACCESS TOKENS (PAT) ─────────────────────────────────────────
-  //
-  // Используются внешними клиентами: iOS Shortcuts, Scriptable и др.
-  // Браузер продолжает использовать httpOnly cookie (JWT).
-  //
-  // Создание PAT требует активной cookie-сессии (authMiddleware).
-  // Использование PAT — через Bearer-заголовок на любом защищённом эндпоинте.
 
-  /**
-   * GET /api/pat
-   * Список PAT текущего пользователя (без сырого токена).
-   */
   app.get("/api/pat", authMiddleware, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
     try {
@@ -139,11 +127,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  /**
-   * POST /api/pat/create
-   * Создать новый PAT. Токен возвращается ОДИН РАЗ — клиент должен его сохранить.
-   * Body: { name?: string }  — например "iOS Shortcuts", "Scriptable Widget"
-   */
   app.post("/api/pat/create", authMiddleware, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     try {
@@ -158,7 +141,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       res.json({
         id: pat.id,
         name: pat.name,
-        token, // ⚠️ Только здесь! Сохраните токен — он больше не будет виден
+        token,
         expiresAt: pat.expiresAt,
         createdAt: pat.createdAt,
       });
@@ -167,10 +150,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  /**
-   * DELETE /api/pat/:id
-   * Отозвать PAT (мягкое удаление — revokedAt проставляется, токен перестаёт работать).
-   */
   app.delete("/api/pat/:id", authMiddleware, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     try {
@@ -182,12 +161,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  /**
-   * POST /api/pat/test
-   * Проверить валидность PAT (для отладки из Scriptable/Shortcuts).
-   * Headers: Authorization: Bearer finwise_pat_xxx
-   * Не требует cookie — полностью открыт для внешних клиентов.
-   */
   app.post("/api/pat/test", async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     try {
@@ -226,13 +199,37 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const userId = getUserId(req);
     const parsed = insertAccountSchema.omit({ userId: true, createdAt: true } as any).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
+
+    // Проверка уникальности имени счёта для данного пользователя
+    const existingAccounts = await pg.getAccounts(userId);
+    const nameConflict = existingAccounts.find(
+      (a) => a.name.toLowerCase() === (parsed.data as any).name.toLowerCase() && !a.isArchived
+    );
+    if (nameConflict) {
+      return res.status(409).json({ error: `Счёт с именем "${(parsed.data as any).name}" уже существует. Используйте другое название.` });
+    }
+
     const acc = await pg.createAccount(userId, parsed.data as any);
     res.json(acc);
   });
 
   app.patch("/api/accounts/:id", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
-    const acc = await pg.updateAccount(Number(req.params.id), getUserId(req), req.body);
+    const userId = getUserId(req);
+    const accountId = Number(req.params.id);
+
+    // Проверка уникальности нового имени при переименовании
+    if (req.body.name) {
+      const existingAccounts = await pg.getAccounts(userId);
+      const nameConflict = existingAccounts.find(
+        (a) => a.name.toLowerCase() === req.body.name.toLowerCase() && a.id !== accountId && !a.isArchived
+      );
+      if (nameConflict) {
+        return res.status(409).json({ error: `Счёт с именем "${req.body.name}" уже существует. Используйте другое название.` });
+      }
+    }
+
+    const acc = await pg.updateAccount(accountId, userId, req.body);
     res.json(acc);
   });
 
@@ -275,7 +272,24 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.post("/api/transactions", guard, async (req: AuthRequest, res) => {
     if (pg) {
       const userId = getUserId(req);
-      const body = { ...req.body, userId };
+      let body = { ...req.body, userId };
+
+      // Резолвинг accountName → accountId для внешних клиентов (iOS Shortcuts и др.)
+      // Если передан accountName (строка) вместо accountId — ищем счёт по имени
+      if (body.accountName && !body.accountId) {
+        const userAccounts = await pg.getAccounts(userId);
+        const found = userAccounts.find(
+          (a) => a.name.toLowerCase() === String(body.accountName).toLowerCase() && !a.isArchived
+        );
+        if (!found) {
+          return res.status(400).json({
+            error: `Счёт с именем "${body.accountName}" не найден. Проверьте название или создайте счёт в FinWise.`
+          });
+        }
+        body.accountId = found.id;
+      }
+      delete body.accountName;
+
       const parsed = insertTransactionSchema.safeParse(body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error });
       const tx = await pg.addTransaction(userId, parsed.data);
@@ -381,14 +395,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── CATEGORIES ────────────────────────────────────────────────────────────
-  // Поддерживает PAT через guard (patOrJwtMiddleware)
-  // Shortcuts использует: GET /api/categories?type=income → динамический список категорий
 
   app.get("/api/categories", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
     const { type } = req.query;
     const all = await pg.getCategories(getUserId(req));
-    // Опциональная фильтрация по type=income|expense для Shortcuts
     const filtered = type ? all.filter(c => c.type === type) : all;
     res.json(filtered);
   });
@@ -413,15 +424,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── WIDGET SUMMARY ────────────────────────────────────────────────────────
-  //
-  // Логика полностью совпадает с Dashboard.tsx:
-  //   totalBalance  = счета типов debit | cash | other (isArchived=false)
-  //   monthIncome   = type income | creditPayment за текущий месяц
-  //   monthExpense  = type expense | creditPurchase за текущий месяц
-  //
-  // Поддерживает два способа аутентификации:
-  //   1. Cookie finwise_token (JWT) — браузер/Electron
-  //   2. Bearer finwise_pat_xxx — Scriptable виджет
+
   app.get("/api/widget/summary", async (req: AuthRequest, res) => {
     if (!pg) {
       return res.json({ totalBalance: 0, monthIncome: 0, monthExpense: 0, streak: 0, level: 1, totalXp: 0, demo: true });
@@ -429,7 +432,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     let userId: number | null = null;
 
-    // 1. JWT в cookie
     const cookieToken = (req as any).cookies?.["finwise_token"];
     if (cookieToken) {
       const { verifyJwt } = await import("./auth");
@@ -437,16 +439,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       if (payload) userId = payload.sub;
     }
 
-    // 2. Bearer: PAT или JWT
     if (!userId) {
       const authHeader = req.headers.authorization;
       if (authHeader?.startsWith("Bearer ")) {
         const bearerToken = authHeader.slice(7);
         if (bearerToken.startsWith("finwise_pat_")) {
-          // PAT — проверяем через storage (обновляет lastUsedAt)
           userId = await pg.verifyAndUpdatePersonalAccessToken(bearerToken);
         } else {
-          // JWT в Bearer (обратная совместимость)
           const { verifyJwt } = await import("./auth");
           const payload = verifyJwt(bearerToken);
           if (payload) userId = payload.sub;
