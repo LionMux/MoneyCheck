@@ -264,10 +264,15 @@ export class PgStorage {
     return updated;
   }
 
-  async archiveAccount(id: number, userId: number): Promise<void> {
-    await db.update(S.accounts)
-      .set({ isArchived: true })
+  /** Физически удаляет счёт. Транзакции остаются (accountId станет висячей ссылкой). */
+  async deleteAccount(id: number, userId: number): Promise<void> {
+    await db.delete(S.accounts)
       .where(and(eq(S.accounts.id, id), eq(S.accounts.userId, userId)));
+  }
+
+  /** @deprecated Используй deleteAccount. Оставлено для обратной совместимости. */
+  async archiveAccount(id: number, userId: number): Promise<void> {
+    await this.deleteAccount(id, userId);
   }
 
   async getAccountBalance(accountId: number): Promise<number> {
@@ -398,7 +403,7 @@ export class PgStorage {
   }
 
   async addCategory(userId: number, data: Omit<S.InsertCategory, "userId">): Promise<S.Category> {
-    const [cat] = await db.insert(S.categories).values({ ...data, userId }).returning();
+    const [cat] = await db.insert(S.categories).values({ ...cat, userId }).returning();
     return cat;
   }
 
@@ -507,14 +512,7 @@ export class PgStorage {
   }
 
   // ── PERSONAL ACCESS TOKENS (PAT) ──────────────────────────────────────────
-  //
-  // Используются внешними клиентами: iOS Shortcuts, Scriptable, и т.д.
-  // Браузер продолжает использовать httpOnly JWT cookie.
 
-  /**
-   * Создать новый PAT для пользователя.
-   * Токен генерируется в routes.ts через generatePAT() и передаётся сюда.
-   */
   async createPersonalAccessToken(
     userId: number,
     token: string,
@@ -531,26 +529,16 @@ export class PgStorage {
     return pat;
   }
 
-  /**
-   * Список PAT пользователя (без сырого токена — только метаданные).
-   * Токен не возвращается после создания — это безопасно.
-   */
   async getPersonalAccessTokens(userId: number): Promise<Omit<S.PersonalAccessToken, "token">[]> {
     const rows = await db.select().from(S.personalAccessTokens)
       .where(and(
         eq(S.personalAccessTokens.userId, userId),
-        // Показываем только не отозванные
         eq(S.personalAccessTokens.revokedAt, null as any)
       ))
       .orderBy(desc(S.personalAccessTokens.createdAt));
-    // Убираем поле token из ответа
     return rows.map(({ token: _token, ...rest }) => rest);
   }
 
-  /**
-   * Мягко отозвать PAT (revokedAt = now).
-   * Проверяем userId чтобы нельзя было отозвать чужой токен.
-   */
   async revokePersonalAccessToken(id: number, userId: number): Promise<void> {
     await db.update(S.personalAccessTokens)
       .set({ revokedAt: now() })
@@ -560,11 +548,6 @@ export class PgStorage {
       ));
   }
 
-  /**
-   * Проверить PAT и обновить lastUsedAt.
-   * Возвращает userId если токен валиден, null — если нет.
-   * Используется в patOrJwtMiddleware и /api/pat/test.
-   */
   async verifyAndUpdatePersonalAccessToken(token: string): Promise<number | null> {
     const [pat] = await db.select().from(S.personalAccessTokens)
       .where(eq(S.personalAccessTokens.token, token))
@@ -572,7 +555,6 @@ export class PgStorage {
     if (!pat) return null;
     if (pat.revokedAt) return null;
     if (new Date() > new Date(pat.expiresAt)) return null;
-    // Обновляем lastUsedAt асинхронно (не блокируем запрос)
     db.update(S.personalAccessTokens)
       .set({ lastUsedAt: now() })
       .where(eq(S.personalAccessTokens.id, pat.id))

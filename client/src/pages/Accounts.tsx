@@ -10,18 +10,19 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  DialogFooter, DialogDescription
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import {
-  CreditCard, Wallet, Banknote, Plus, Pencil, Archive,
-  TrendingDown, AlertCircle, CheckCircle
+  CreditCard, Wallet, Banknote, Plus, Pencil, Trash2,
+  AlertCircle, CheckCircle
 } from "lucide-react";
 
 const ACCOUNT_TYPES = [
@@ -31,7 +32,6 @@ const ACCOUNT_TYPES = [
   { value: "other",  label: "Другое",     icon: Wallet,     color: "bg-purple-500" },
 ] as const;
 
-// Доступные цвета карты — добавлен чёрный (#1a1a1a)
 const CARD_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#ec4899", "#1a1a1a"];
 
 type AccountType = typeof ACCOUNT_TYPES[number]["value"];
@@ -89,7 +89,6 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       onDone();
     } catch (err: any) {
-      // 409 — дубликат имени: подсвечиваем поле и показываем ошибку под ним
       if (err.status === 409 || (err.message && err.message.includes("уже существует"))) {
         setNameError(err.message ?? "Счёт с таким именем уже существует");
         toast({
@@ -209,7 +208,7 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
   );
 }
 
-// ── Credit Card Detail Card ────────────────────────────────────────────
+// ── Credit Card Detail ─────────────────────────────────────────────────
 
 function CreditCardDetail({ account }: { account: Account }) {
   const limit = account.creditLimit ? parseFloat(String(account.creditLimit)) : null;
@@ -249,7 +248,14 @@ function CreditCardDetail({ account }: { account: Account }) {
             <span>Использовано</span>
             <span>{Math.round(usedPct)}%</span>
           </div>
-          <Progress value={usedPct} className={`h-2 ${usedPct > 80 ? "[&>div]:bg-red-500" : usedPct > 50 ? "[&>div]:bg-amber-500" : "[&>div]:bg-emerald-500"}`} />
+          <Progress
+            value={usedPct}
+            className={`h-2 ${
+              usedPct > 80 ? "[&>div]:bg-red-500" :
+              usedPct > 50 ? "[&>div]:bg-amber-500" :
+              "[&>div]:bg-emerald-500"
+            }`}
+          />
         </div>
       )}
       {debt > 0 ? (
@@ -267,18 +273,23 @@ function CreditCardDetail({ account }: { account: Account }) {
   );
 }
 
-// ── Account Card ─────────────────────────────────────────────────────────────
+// ── Account Card ──────────────────────────────────────────────────────────
 
 function AccountCard({ account }: { account: Account }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const archiveMutation = useMutation({
+  const deleteMutation = useMutation({
     mutationFn: () => apiRequest("DELETE", `/api/accounts/${account.id}`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
-      toast({ title: "Счёт архивирован" });
+      toast({ title: "Счёт удалён", description: "История транзакций сохранена" });
+      setDeleteOpen(false);
+    },
+    onError: (err: any) => {
+      toast({ title: "Ошибка", description: err.message, variant: "destructive" });
     },
   });
 
@@ -316,6 +327,7 @@ function AccountCard({ account }: { account: Account }) {
         {account.type === "credit" && <CreditCardDetail account={account} />}
 
         <div className="flex gap-2 mt-3">
+          {/* Edit */}
           <Dialog open={editOpen} onOpenChange={setEditOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" data-testid={`btn-edit-account-${account.id}`}>
@@ -331,17 +343,50 @@ function AccountCard({ account }: { account: Account }) {
             </DialogContent>
           </Dialog>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-muted-foreground"
-            onClick={() => archiveMutation.mutate()}
-            disabled={archiveMutation.isPending}
-            data-testid={`btn-archive-account-${account.id}`}
-          >
-            <Archive size={13} />
-            Архив
-          </Button>
+          {/* Delete with confirmation */}
+          <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <DialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                data-testid={`btn-delete-account-${account.id}`}
+              >
+                <Trash2 size={13} />
+                Удалить
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Удалить счёт?</DialogTitle>
+                <DialogDescription className="space-y-2 pt-1">
+                  <span className="block">
+                    Счёт <span className="font-semibold text-foreground">{account.name}</span> будет удалён безвозвратно.
+                  </span>
+                  <span className="block text-emerald-600 dark:text-emerald-400 text-xs">
+                    ✓ История транзакций будет сохранена
+                  </span>
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteOpen(false)}
+                  disabled={deleteMutation.isPending}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                  data-testid={`btn-confirm-delete-account-${account.id}`}
+                >
+                  {deleteMutation.isPending ? "Удаляем..." : "Удалить"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </CardContent>
     </Card>
@@ -391,7 +436,6 @@ export default function AccountsPage() {
   });
 
   const active = accounts.filter(a => !a.isArchived);
-  const archived = accounts.filter(a => a.isArchived);
   const byType = (type: string) => active.filter(a => a.type === type);
 
   return (
@@ -461,13 +505,6 @@ export default function AccountsPage() {
         <section>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Другие счета</h2>
           <div className="grid gap-3">{byType("other").map(a => <AccountCard key={a.id} account={a} />)}</div>
-        </section>
-      )}
-
-      {archived.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Архив ({archived.length})</h2>
-          <div className="grid gap-3 opacity-60">{archived.map(a => <AccountCard key={a.id} account={a} />)}</div>
         </section>
       )}
     </div>

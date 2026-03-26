@@ -211,7 +211,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const parsed = insertAccountSchema.omit({ userId: true, createdAt: true } as any).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
 
-    // Проверка уникальности имени счёта для данного пользователя
     const existingAccounts = await pg.getAccounts(userId);
     const nameConflict = existingAccounts.find(
       (a) => a.name.toLowerCase() === (parsed.data as any).name.toLowerCase() && !a.isArchived
@@ -229,7 +228,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const userId = getUserId(req);
     const accountId = Number(req.params.id);
 
-    // Проверка уникальности нового имени при переименовании
     if (req.body.name) {
       const existingAccounts = await pg.getAccounts(userId);
       const nameConflict = existingAccounts.find(
@@ -246,7 +244,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   app.delete("/api/accounts/:id", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
-    await pg.archiveAccount(Number(req.params.id), getUserId(req));
+    await pg.deleteAccount(Number(req.params.id), getUserId(req));
     res.json({ ok: true });
   });
 
@@ -285,8 +283,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const userId = getUserId(req);
       let body = { ...req.body, userId };
 
-      // Резолвинг accountName → accountId для внешних клиентов (iOS Shortcuts и др.)
-      // Если передан accountName (строка) вместо accountId — ищем счёт по имени
       let resolvedAccountType: string | undefined;
       if (body.accountName && !body.accountId) {
         const userAccounts = await pg.getAccounts(userId);
@@ -301,18 +297,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         body.accountId = found.id;
         resolvedAccountType = found.type;
       } else if (body.accountId) {
-        // accountId передан напрямую — узнаём тип счёта для resolveType
         const userAccounts = await pg.getAccounts(userId);
         const found = userAccounts.find((a) => a.id === Number(body.accountId));
         resolvedAccountType = found?.type;
       }
       delete body.accountName;
 
-      // Автоконвертация типа: expense→creditPurchase / income→creditPayment для кредитных счётов.
-      // Зеркалит логику resolveType() из Transactions.tsx — теперь работает и для внешних клиентов.
       body.type = resolveTransactionType(body.type, resolvedAccountType);
 
-      // Нормализация суммы: creditPurchase всегда отрицательный, creditPayment — положительный
       if (body.type === "creditPurchase") {
         body.amount = -Math.abs(Number(body.amount));
       } else if (body.type === "creditPayment") {
