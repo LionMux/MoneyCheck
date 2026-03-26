@@ -97,6 +97,10 @@ export type InsertAccount = z.infer<typeof insertAccountSchema>;
 export type Account = typeof accounts.$inferSelect;
 
 // ─── CATEGORIES ────────────────────────────────────────────────────────────
+// sortOrder — порядок отображения категорий для каждого пользователя.
+// Чем меньше число — тем выше категория в списке.
+// При drag-and-drop фронтенд отправляет PATCH /api/categories/reorder
+// с новым порядком id, бэкенд обновляет sortOrder.
 
 export const categories = pgTable("categories", {
   id:        serial("id").primaryKey(),
@@ -106,6 +110,7 @@ export const categories = pgTable("categories", {
   icon:      text("icon").notNull().default("Tag"),
   color:     text("color").notNull().default("#20808D"),
   isDefault: boolean("is_default").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
