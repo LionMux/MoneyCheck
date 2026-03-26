@@ -1,11 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Reorder, useDragControls } from "framer-motion";
-import {
-  GripVertical, Plus, Trash2, Pencil
-} from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { GripVertical, Plus, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -34,37 +32,115 @@ const COLOR_OPTIONS = [
   "#3BB273", "#F18F01",
 ];
 
+// ─── Drag-and-drop section ───────────────────────────────────────────────────
+
+function useDragSort(
+  initial: Category[],
+  onCommit: (order: number[]) => void
+) {
+  const [items, setItems] = useState<Category[]>(initial);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const pointerStartY = useRef(0);
+  const itemHeight = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // sync when server data changes (add/remove/rename)
+  const prevIds = useRef(initial.map(c => c.id).join(","));
+  const curIds = initial.map(c => c.id).join(",");
+  if (curIds !== prevIds.current) {
+    prevIds.current = curIds;
+    setItems(initial);
+  }
+
+  const onPointerDown = useCallback((e: React.PointerEvent, id: number) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerStartY.current = e.clientY;
+    // measure item height from list
+    if (listRef.current) {
+      const first = listRef.current.children[0] as HTMLElement;
+      if (first) itemHeight.current = first.getBoundingClientRect().height + 8; // gap-2 = 8px
+    }
+    setDraggingId(id);
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent, id: number) => {
+    if (draggingId !== id) return;
+    const dy = e.clientY - pointerStartY.current;
+    const steps = Math.round(dy / (itemHeight.current || 60));
+    if (steps === 0) return;
+
+    setItems(prev => {
+      const idx = prev.findIndex(c => c.id === id);
+      if (idx === -1) return prev;
+      const newIdx = Math.max(0, Math.min(prev.length - 1, idx + steps));
+      if (newIdx === idx) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(idx, 1);
+      next.splice(newIdx, 0, moved);
+      pointerStartY.current = e.clientY;
+      return next;
+    });
+  }, [draggingId]);
+
+  const onPointerUp = useCallback(() => {
+    if (draggingId !== null) {
+      setItems(prev => {
+        onCommit(prev.map(c => c.id));
+        return prev;
+      });
+    }
+    setDraggingId(null);
+  }, [draggingId, onCommit]);
+
+  return { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp };
+}
+
+// ─── Single item ─────────────────────────────────────────────────────────────
+
 function CategoryItem({
   cat,
+  isDragging,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
   onEdit,
   onDelete,
 }: {
   cat: Category;
+  isDragging: boolean;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onPointerMove: (e: React.PointerEvent) => void;
+  onPointerUp: (e: React.PointerEvent) => void;
   onEdit: (cat: Category) => void;
   onDelete: (cat: Category) => void;
 }) {
-  const controls = useDragControls();
-
   return (
-    <Reorder.Item
-      value={cat}
-      dragListener={false}
-      dragControls={controls}
-      className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card shadow-sm select-none touch-none"
-      whileDrag={{ scale: 1.03, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50 }}
+    <motion.div
       layout
-      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+      transition={{ type: "spring", stiffness: 500, damping: 40 }}
+      animate={{
+        scale: isDragging ? 1.03 : 1,
+        boxShadow: isDragging
+          ? "0 8px 24px rgba(0,0,0,0.15)"
+          : "0 1px 3px rgba(0,0,0,0.06)",
+        zIndex: isDragging ? 50 : 0,
+      }}
+      className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none"
     >
-      {/* Drag handle — единственная зона для перетаскивания */}
+      {/* Drag handle — единственная зона перетаскивания */}
       <div
-        className="cursor-grab active:cursor-grabbing touch-none p-1 -ml-1 flex-shrink-0"
-        onPointerDown={(e) => controls.start(e)}
+        className="touch-none cursor-grab active:cursor-grabbing p-1 -ml-1 flex-shrink-0"
+        style={{ touchAction: "none" }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         <GripVertical size={16} className="text-muted-foreground/50" />
       </div>
 
       <div
-        className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm"
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
         style={{ backgroundColor: cat.color }}
       >
         {cat.name.slice(0, 1).toUpperCase()}
@@ -90,18 +166,14 @@ function CategoryItem({
           </Button>
         </div>
       )}
-    </Reorder.Item>
+    </motion.div>
   );
 }
 
+// ─── Section ─────────────────────────────────────────────────────────────────
+
 function CategorySection({
-  title,
-  type,
-  categories,
-  onReorder,
-  onEdit,
-  onDelete,
-  onAdd,
+  title, type, categories, onReorder, onEdit, onDelete, onAdd,
 }: {
   title: string;
   type: "income" | "expense";
@@ -111,19 +183,13 @@ function CategorySection({
   onDelete: (cat: Category) => void;
   onAdd: (type: "income" | "expense") => void;
 }) {
-  const [items, setItems] = useState<Category[]>(categories);
+  const commit = useCallback(
+    (order: number[]) => onReorder(type, order),
+    [type, onReorder]
+  );
 
-  // sync when server data updates
-  if (
-    categories.length !== items.length ||
-    categories.some((c, i) => c.id !== items[i]?.id || c.name !== items[i]?.name || c.color !== items[i]?.color)
-  ) {
-    setItems(categories);
-  }
-
-  const handleReorderEnd = () => {
-    onReorder(type, items.map(c => c.id));
-  };
+  const { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp } =
+    useDragSort(categories, commit);
 
   return (
     <div className="space-y-2">
@@ -139,29 +205,28 @@ function CategorySection({
           Нет категорий
         </div>
       ) : (
-        <Reorder.Group
-          axis="y"
-          values={items}
-          onReorder={setItems}
-          className="space-y-2"
-          as="div"
-        >
-          {items.map(cat => (
-            <CategoryItem
-              key={cat.id}
-              cat={cat}
-              onEdit={onEdit}
-              onDelete={onDelete}
-            />
-          ))}
-        </Reorder.Group>
+        <div ref={listRef} className="flex flex-col gap-2">
+          <AnimatePresence initial={false}>
+            {items.map(cat => (
+              <CategoryItem
+                key={cat.id}
+                cat={cat}
+                isDragging={draggingId === cat.id}
+                onPointerDown={(e) => onPointerDown(e, cat.id)}
+                onPointerMove={(e) => onPointerMove(e, cat.id)}
+                onPointerUp={onPointerUp}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
       )}
-
-      {/* invisible drop zone to trigger save */}
-      <div onPointerUp={handleReorderEnd} className="h-0" />
     </div>
   );
 }
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function CategoryManager() {
   const { toast } = useToast();
@@ -182,8 +247,10 @@ export default function CategoryManager() {
     queryKey: ["/api/categories"],
   });
 
-  const incomeCategories = [...categories.filter(c => c.type === "income")].sort((a, b) => a.sortOrder - b.sortOrder);
-  const expenseCategories = [...categories.filter(c => c.type === "expense")].sort((a, b) => a.sortOrder - b.sortOrder);
+  const incomeCategories = [...categories.filter(c => c.type === "income")]
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const expenseCategories = [...categories.filter(c => c.type === "expense")]
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const addMutation = useMutation({
     mutationFn: async (data: { name: string; type: string; icon: string; color: string }) => {
@@ -280,9 +347,7 @@ export default function CategoryManager() {
               <label className="text-sm font-medium">Цвет</label>
               <div className="flex flex-wrap gap-2">
                 {COLOR_OPTIONS.map(c => (
-                  <button
-                    key={c} type="button"
-                    onClick={() => setNewColor(c)}
+                  <button key={c} type="button" onClick={() => setNewColor(c)}
                     className={`w-7 h-7 rounded-full border-2 transition-transform ${
                       newColor === c ? "border-foreground scale-110" : "border-transparent"
                     }`}
@@ -322,9 +387,7 @@ export default function CategoryManager() {
               <label className="text-sm font-medium">Цвет</label>
               <div className="flex flex-wrap gap-2">
                 {COLOR_OPTIONS.map(c => (
-                  <button
-                    key={c} type="button"
-                    onClick={() => setEditColor(c)}
+                  <button key={c} type="button" onClick={() => setEditColor(c)}
                     className={`w-7 h-7 rounded-full border-2 transition-transform ${
                       editColor === c ? "border-foreground scale-110" : "border-transparent"
                     }`}
@@ -350,7 +413,7 @@ export default function CategoryManager() {
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить категорию?</AlertDialogTitle>
             <AlertDialogDescription>
-              Категория «{deleteCat?.name}» будет удалена. Транзакции с этой категорией сохранятся.
+              Категория «{deleteCat?.name}» будет удалена. Транзакции сохранятся.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
