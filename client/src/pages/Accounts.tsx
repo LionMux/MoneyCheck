@@ -46,7 +46,7 @@ function formatCurrency(amount: number | string): string {
   return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
 }
 
-// ── Add/Edit Account Dialog ────────────────────────────────────────────────
+// ── Add/Edit Account Dialog ────────────────────────────────────────────
 
 interface AccountFormProps {
   initial?: Account;
@@ -64,10 +64,12 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
   const [creditLimit, setCreditLimit] = useState(initial?.creditLimit ? String(initial.creditLimit) : "");
   const [color, setColor] = useState(initial?.color ?? "#10b981");
   const [loading, setLoading] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setNameError(null);
     try {
       const payload = {
         name,
@@ -87,7 +89,17 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       onDone();
     } catch (err: any) {
-      toast({ title: "Ошибка", description: err.message, variant: "destructive" });
+      // 409 — дубликат имени: подсвечиваем поле и показываем ошибку под ним
+      if (err.status === 409 || (err.message && err.message.includes("уже существует"))) {
+        setNameError(err.message ?? "Счёт с таким именем уже существует");
+        toast({
+          title: "Не удалось сохранить",
+          description: err.message ?? "Счёт с таким именем уже существует. Придумайте другое название.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Ошибка", description: err.message, variant: "destructive" });
+      }
     } finally {
       setLoading(false);
     }
@@ -100,10 +112,20 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
         <Input
           placeholder="Например: Сбербанк Дебетовая"
           value={name}
-          onChange={e => setName(e.target.value)}
+          onChange={e => {
+            setName(e.target.value);
+            if (nameError) setNameError(null);
+          }}
           required
           data-testid="input-account-name"
+          className={nameError ? "border-red-500 focus-visible:ring-red-500" : ""}
         />
+        {nameError && (
+          <p className="text-xs text-red-500 flex items-center gap-1">
+            <AlertCircle size={11} />
+            {nameError}
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
@@ -187,7 +209,7 @@ function AccountForm({ initial, onDone }: AccountFormProps) {
   );
 }
 
-// ── Credit Card Detail Card ────────────────────────────────────────────────
+// ── Credit Card Detail Card ────────────────────────────────────────────
 
 function CreditCardDetail({ account }: { account: Account }) {
   const limit = account.creditLimit ? parseFloat(String(account.creditLimit)) : null;
@@ -245,7 +267,7 @@ function CreditCardDetail({ account }: { account: Account }) {
   );
 }
 
-// ── Account Card ───────────────────────────────────────────────────────────
+// ── Account Card ─────────────────────────────────────────────────────────────
 
 function AccountCard({ account }: { account: Account }) {
   const qc = useQueryClient();
