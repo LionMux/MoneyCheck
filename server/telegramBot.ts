@@ -3,6 +3,7 @@ import TelegramBot from "node-telegram-bot-api";
 import { exec } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
+import si from 'systeminformation';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,54 +20,45 @@ function isAdmin(chatId: number): boolean {
   return chatId === ADMIN_ID;
 }
 
-// Главное меню с кнопками
 const mainMenu = {
   reply_markup: {
     inline_keyboard: [
       [{ text: "🔄 Rebuild сервера", callback_data: "rebuild" }],
       [{ text: "📊 Статус процессов", callback_data: "status" }],
+      [{ text: "🖥️ Железо сервера", callback_data: "stats" }],
       [{ text: "📋 Последние логи", callback_data: "logs" }],
     ]
   }
 };
 
-// /start
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   if (!isAdmin(chatId)) return bot.sendMessage(chatId, "⛔ Доступ запрещён");
 
   bot.sendMessage(chatId,
-    `👋 *MoneyCheck Control Panel*\n\n` +
-    `Управляй сервером прямо из Telegram.\n` +
-    `Выбери действие:`,
+    `👋 *MoneyCheck Control Panel*\n\nУправляй сервером прямо из Telegram.\nВыбери действие:`,
     { parse_mode: "Markdown", ...mainMenu }
   );
 });
 
-// Парсим статус PM2 в красивый формат
 function formatStatus(raw: string): string {
   const lines = raw.split('\n').filter(l => l.includes('online') || l.includes('stopped') || l.includes('errored'));
   if (!lines.length) return '❓ Нет данных';
 
   return lines.map(line => {
     const isOnline = line.includes('online');
-    const isStopped = line.includes('stopped');
     const isErrored = line.includes('errored');
-
     const icon = isOnline ? '🟢' : isErrored ? '🔴' : '🟡';
     const nameMatch = line.match(/│\s+\d+\s+│\s+(\S+)/);
     const memMatch = line.match(/(\d+(?:\.\d+)?mb)/i);
     const uptimeMatch = line.match(/│\s+(\d+[smhd])\s+│/);
-
     const name = nameMatch?.[1] ?? 'unknown';
     const mem = memMatch?.[1] ?? '—';
     const uptime = uptimeMatch?.[1] ?? '—';
-
-    return `${icon} *${name}* — ${isOnline ? 'online' : isStopped ? 'stopped' : 'error'}\n   ⏱ uptime: ${uptime} | 💾 mem: ${mem}`;
+    return `${icon} *${name}* — ${isOnline ? 'online' : isErrored ? 'error' : 'stopped'}\n   ⏱ uptime: ${uptime} | 💾 mem: ${mem}`;
   }).join('\n\n');
 }
 
-// Обработка inline-кнопок
 bot.on('callback_query', async (query) => {
   const chatId = query.message!.chat.id;
   const msgId = query.message!.message_id;
@@ -98,6 +90,39 @@ bot.on('callback_query', async (query) => {
     });
   }
 
+  if (query.data === "stats") {
+    const [cpu, mem, temp, disk, load] = await Promise.all([
+      si.cpu(),
+      si.mem(),
+      si.cpuTemperature(),
+      si.fsSize(),
+      si.currentLoad()
+    ]);
+
+    const memUsed = (mem.active / mem.total * 100).toFixed(1);
+    const memUsedGb = (mem.active / 1024 / 1024 / 1024).toFixed(1);
+    const memTotalGb = (mem.total / 1024 / 1024 / 1024).toFixed(1);
+    const diskMain = disk[0];
+    const diskUsed = diskMain ? diskMain.use.toFixed(1) : '—';
+    const diskFreeGb = diskMain ? (diskMain.available / 1024 / 1024 / 1024).toFixed(1) : '—';
+    const tempVal = temp.main > 0 ? `${temp.main}°C` : '—';
+    const cpuLoad = load.currentLoad.toFixed(1);
+    const time = si.time();
+    const uptimeH = Math.floor(time.uptime / 3600);
+    const uptimeM = Math.floor((time.uptime % 3600) / 60);
+
+    bot.editMessageText(
+      `🖥️ *Состояние сервера*\n\n` +
+      `🔲 *CPU:* ${cpu.manufacturer} ${cpu.brand}\n` +
+      `   ⚡ Нагрузка: ${cpuLoad}%\n` +
+      `   🌡️ Температура: ${tempVal}\n\n` +
+      `💾 *RAM:* ${memUsedGb} / ${memTotalGb} GB (${memUsed}%)\n\n` +
+      `💿 *Диск:* использовано ${diskUsed}%, свободно ${diskFreeGb} GB\n\n` +
+      `⏱️ *Аптайм:* ${uptimeH}ч ${uptimeM}мин`,
+      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+    );
+  }
+
   if (query.data === "rebuild") {
     bot.editMessageText(
       `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЭто займёт ~30-60 секунд`,
@@ -121,13 +146,6 @@ bot.on('callback_query', async (query) => {
         { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
       );
     });
-  }
-
-  if (query.data === "menu") {
-    bot.editMessageText(
-      `👋 *MoneyCheck Control Panel*\n\nВыбери действие:`,
-      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
-    );
   }
 });
 
