@@ -43,7 +43,7 @@ function resolveTransactionType(
   if (accountType !== "credit") return rawType;
   if (rawType === "expense") return "creditPurchase";
   if (rawType === "income")  return "creditPayment";
-  return rawType; // creditPurchase / creditPayment переданы явно — не трогаем
+  return rawType;
 }
 
 export async function registerRoutes(httpServer: Server, app: Express) {
@@ -144,18 +144,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const { name } = z.object({
         name: z.string().min(1).max(100).optional(),
       }).parse(req.body);
-
       const token = generatePAT();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
       const pat = await pg.createPersonalAccessToken(req.userId!, token, expiresAt, name ?? "API Token");
-
-      res.json({
-        id: pat.id,
-        name: pat.name,
-        token,
-        expiresAt: pat.expiresAt,
-        createdAt: pat.createdAt,
-      });
+      res.json({ id: pat.id, name: pat.name, token, expiresAt: pat.expiresAt, createdAt: pat.createdAt });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
@@ -181,9 +173,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       }
       const token = authHeader.slice(7);
       const userId = await pg.verifyAndUpdatePersonalAccessToken(token);
-      if (!userId) {
-        return res.status(401).json({ ok: false, error: "Токен недействителен или истёк" });
-      }
+      if (!userId) return res.status(401).json({ ok: false, error: "Токен недействителен или истёк" });
       res.json({ ok: true, userId, message: "Токен действителен ✅" });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -210,7 +200,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const userId = getUserId(req);
     const parsed = insertAccountSchema.omit({ userId: true, createdAt: true } as any).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-
     const existingAccounts = await pg.getAccounts(userId);
     const nameConflict = existingAccounts.find(
       (a) => a.name.toLowerCase() === (parsed.data as any).name.toLowerCase() && !a.isArchived
@@ -218,7 +207,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (nameConflict) {
       return res.status(409).json({ error: `Счёт с именем "${(parsed.data as any).name}" уже существует. Используйте другое название.` });
     }
-
     const acc = await pg.createAccount(userId, parsed.data as any);
     res.json(acc);
   });
@@ -227,7 +215,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (!pg) return res.status(503).json({ error: "DB required" });
     const userId = getUserId(req);
     const accountId = Number(req.params.id);
-
     if (req.body.name) {
       const existingAccounts = await pg.getAccounts(userId);
       const nameConflict = existingAccounts.find(
@@ -237,7 +224,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(409).json({ error: `Счёт с именем "${req.body.name}" уже существует. Используйте другое название.` });
       }
     }
-
     const acc = await pg.updateAccount(accountId, userId, req.body);
     res.json(acc);
   });
@@ -282,7 +268,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (pg) {
       const userId = getUserId(req);
       let body = { ...req.body, userId };
-
       let resolvedAccountType: string | undefined;
       if (body.accountName && !body.accountId) {
         const userAccounts = await pg.getAccounts(userId);
@@ -302,15 +287,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         resolvedAccountType = found?.type;
       }
       delete body.accountName;
-
       body.type = resolveTransactionType(body.type, resolvedAccountType);
-
-      if (body.type === "creditPurchase") {
-        body.amount = -Math.abs(Number(body.amount));
-      } else if (body.type === "creditPayment") {
-        body.amount = Math.abs(Number(body.amount));
-      }
-
+      if (body.type === "creditPurchase") body.amount = -Math.abs(Number(body.amount));
+      else if (body.type === "creditPayment") body.amount = Math.abs(Number(body.amount));
       const parsed = insertTransactionSchema.safeParse(body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error });
       const tx = await pg.addTransaction(userId, parsed.data);
@@ -425,6 +404,62 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(filtered);
   });
 
+  app.post("/api/categories", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const data = z.object({
+        name: z.string().min(1).max(100),
+        type: z.enum(["income", "expense"]),
+        icon: z.string().default("Tag"),
+        color: z.string().default("#20808D"),
+      }).parse(req.body);
+      const cat = await pg.addCategory(getUserId(req), { ...data, isDefault: false });
+      res.json(cat);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/categories/reorder", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const { type, order } = z.object({
+        type: z.enum(["income", "expense"]),
+        order: z.array(z.number()),
+      }).parse(req.body);
+      await pg.reorderCategories(getUserId(req), type, order);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/categories/:id", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const id = z.coerce.number().parse(req.params.id);
+      const data = z.object({
+        name: z.string().min(1).max(100).optional(),
+        icon: z.string().optional(),
+        color: z.string().optional(),
+      }).parse(req.body);
+      const cat = await pg.updateCategory(id, getUserId(req), data);
+      res.json(cat);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/categories/:id", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      await pg.deleteCategory(z.coerce.number().parse(req.params.id), getUserId(req));
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
 
   app.get("/api/notifications", guard, async (req: AuthRequest, res) => {
@@ -450,16 +485,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (!pg) {
       return res.json({ totalBalance: 0, monthIncome: 0, monthExpense: 0, streak: 0, level: 1, totalXp: 0, demo: true });
     }
-
     let userId: number | null = null;
-
     const cookieToken = (req as any).cookies?.["finwise_token"];
     if (cookieToken) {
       const { verifyJwt } = await import("./auth");
       const payload = verifyJwt(cookieToken);
       if (payload) userId = payload.sub;
     }
-
     if (!userId) {
       const authHeader = req.headers.authorization;
       if (authHeader?.startsWith("Bearer ")) {
@@ -473,35 +505,26 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         }
       }
     }
-
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized. Please login via FinWise web app first." });
-    }
-
+    if (!userId) return res.status(401).json({ error: "Unauthorized. Please login via FinWise web app first." });
     try {
       const accounts = await pg.getAccounts(userId);
-
       let totalBalance = 0;
       for (const acc of accounts) {
         if (!acc.isArchived && (acc.type === "debit" || acc.type === "cash" || acc.type === "other")) {
           totalBalance += await pg.getAccountBalance(acc.id);
         }
       }
-
       const allTxs = await pg.getTransactions(userId);
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const monthTxs = allTxs.filter(t => String(t.date).slice(0, 7) === currentMonth);
-
       let monthIncome = 0;
       let monthExpense = 0;
       for (const t of monthTxs) {
         if (t.type === "income" || t.type === "creditPayment") monthIncome += Number(t.amount);
         else if (t.type === "expense" || t.type === "creditPurchase") monthExpense += Math.abs(Number(t.amount));
       }
-
       const progress = await pg.getUserProgress(userId);
-
       return res.json({
         totalBalance: Math.round(totalBalance),
         monthIncome: Math.round(monthIncome),
