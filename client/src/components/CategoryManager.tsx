@@ -21,6 +21,7 @@ const COLOR_OPTIONS = [
 
 const SWIPE_THRESHOLD = 90;
 
+// ─ useDragSort ───────────────────────────────────────────────────────────
 function useDragSort(initial: Category[], onCommit: (order: number[]) => void) {
   const [items, setItems] = useState<Category[]>(initial);
   const [draggingId, setDraggingId] = useState<number | null>(null);
@@ -67,55 +68,85 @@ function useDragSort(initial: Category[], onCommit: (order: number[]) => void) {
   return { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp };
 }
 
+// ─ SwipeToDelete ────────────────────────────────────────────────────
+// Fix: use ref for offsetX so onPointerUp closure always reads latest value
 function SwipeToDelete({ canDelete, onDelete, children }: {
   canDelete: boolean; onDelete: () => void; children: React.ReactNode;
 }) {
   const [ox, setOx] = useState(0);
-  const sx = useRef(0); const sy = useRef(0);
-  const active = useRef(false); const dir = useRef<"x"|"y"|null>(null);
+  const oxRef = useRef(0); // mirrors ox but readable in closures
+  const sx = useRef(0);
+  const active = useRef(false);
+  const dir = useRef<"x"|"y"|null>(null);
+  const [isActive, setIsActive] = useState(false);
+
+  const setOffset = (v: number) => { oxRef.current = v; setOx(v); };
   const opacity = Math.min(1, Math.abs(ox) / SWIPE_THRESHOLD);
 
   const pd = (e: React.PointerEvent) => {
     if (!canDelete) return;
-    sx.current = e.clientX; sy.current = e.clientY;
-    active.current = true; dir.current = null;
+    // Don't capture if clicking a button inside
+    if ((e.target as HTMLElement).closest('button')) return;
+    sx.current = e.clientX;
+    active.current = true;
+    dir.current = null;
+    setIsActive(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
+
   const pm = (e: React.PointerEvent) => {
     if (!active.current) return;
-    const dx = e.clientX - sx.current, dy = e.clientY - sy.current;
+    const dx = e.clientX - sx.current;
+    const dy = e.clientY - (e.clientY); // unused, just for clarity
     if (!dir.current) {
-      if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
-      dir.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      const adx = Math.abs(e.clientX - sx.current);
+      // We need original Y — track it
+      if (adx < 5) return;
+      dir.current = "x";
     }
     if (dir.current === "y") return;
     e.preventDefault();
-    setOx(Math.min(0, dx));
+    setOffset(Math.min(0, dx));
   };
+
   const pu = () => {
     if (!active.current) return;
     active.current = false;
-    if (ox < -SWIPE_THRESHOLD) onDelete(); else setOx(0);
+    setIsActive(false);
+    if (oxRef.current < -SWIPE_THRESHOLD) {
+      onDelete();
+    } else {
+      setOffset(0);
+    }
   };
 
   if (!canDelete) return <>{children}</>;
   return (
     <div className="relative overflow-hidden rounded-xl" style={{ touchAction: "pan-y" }}>
-      <div className="absolute inset-0 bg-destructive rounded-xl flex items-center justify-end pr-5" style={{ opacity }}>
-        <motion.div animate={{ scale: 0.65 + 0.35 * opacity }} transition={{ type: "spring", stiffness: 400, damping: 25 }}>
+      <div
+        className="absolute inset-0 bg-destructive rounded-xl flex items-center justify-end pr-5"
+        style={{ opacity }}
+      >
+        <motion.div
+          animate={{ scale: 0.65 + 0.35 * opacity }}
+          transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        >
           <Trash2 size={20} className="text-white" />
         </motion.div>
       </div>
       <motion.div
         animate={{ x: ox }}
-        transition={active.current ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 42 }}
+        transition={isActive ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 42 }}
         onPointerDown={pd} onPointerMove={pm} onPointerUp={pu} onPointerCancel={pu}
         className="relative"
-      >{children}</motion.div>
+      >
+        {children}
+      </motion.div>
     </div>
   );
 }
 
+// ─ CategoryItem ─────────────────────────────────────────────────────────
 function CategoryItem({ cat, isDragging, onDragDown, onDragMove, onDragUp, onEdit }: {
   cat: Category; isDragging: boolean;
   onDragDown: (e: React.PointerEvent) => void;
@@ -125,8 +156,8 @@ function CategoryItem({ cat, isDragging, onDragDown, onDragMove, onDragUp, onEdi
 }) {
   return (
     <motion.div
-      layout layoutId={`cat-${cat.id}`}
-      transition={{ type: "spring", stiffness: 500, damping: 40 }}
+      layout={!isDragging}
+      transition={{ type: "spring", stiffness: 380, damping: 36 }}
       animate={{
         scale: isDragging ? 1.03 : 1,
         boxShadow: isDragging ? "0 12px 32px rgba(0,0,0,0.18)" : "0 1px 3px rgba(0,0,0,0.05)",
@@ -134,20 +165,30 @@ function CategoryItem({ cat, isDragging, onDragDown, onDragMove, onDragUp, onEdi
       style={{ zIndex: isDragging ? 50 : "auto", position: "relative" }}
       className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none"
     >
-      <div className="p-1 -ml-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
+      <div
+        className="p-1 -ml-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
         style={{ touchAction: "none" }}
-        onPointerDown={onDragDown} onPointerMove={onDragMove}
-        onPointerUp={onDragUp} onPointerCancel={onDragUp}>
+        onPointerDown={onDragDown}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragUp}
+        onPointerCancel={onDragUp}
+      >
         <GripVertical size={16} className="text-muted-foreground/40" />
       </div>
-      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-        style={{ backgroundColor: cat.color }}>
+      <div
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+        style={{ backgroundColor: cat.color }}
+      >
         {cat.name.slice(0,1).toUpperCase()}
       </div>
       <span className="flex-1 text-sm font-medium truncate">{cat.name}</span>
       {!cat.isDefault && (
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground flex-shrink-0"
-          onClick={() => onEdit(cat)}>
+        <Button
+          variant="ghost" size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-foreground flex-shrink-0"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onEdit(cat); }}
+        >
           <Pencil size={13} />
         </Button>
       )}
@@ -155,10 +196,12 @@ function CategoryItem({ cat, isDragging, onDragDown, onDragMove, onDragUp, onEdi
   );
 }
 
+// ─ CategorySection ────────────────────────────────────────────────────
 function CategorySection({ title, type, categories, onReorder, onEdit, onDelete, onAdd }: {
   title: string; type: "income"|"expense"; categories: Category[];
   onReorder: (type: "income"|"expense", order: number[]) => void;
-  onEdit: (cat: Category) => void; onDelete: (id: number) => void;
+  onEdit: (cat: Category) => void;
+  onDelete: (id: number) => void;
   onAdd: (type: "income"|"expense") => void;
 }) {
   const commit = useCallback((o: number[]) => onReorder(type, o), [type, onReorder]);
@@ -174,30 +217,37 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
       {items.length === 0 ? (
         <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">Нет категорий</div>
       ) : (
-        <motion.div ref={listRef} className="flex flex-col gap-2" layout>
+        <div ref={listRef} className="flex flex-col gap-2">
           <AnimatePresence initial={false}>
             {items.map(cat => (
-              <motion.div key={cat.id} layout
+              <motion.div
+                key={cat.id}
+                layout
                 initial={{ opacity: 0, scale: 0.94, y: -6 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.88, x: -80, transition: { duration: 0.22, ease: [0.4,0,0.2,1] } }}
-                transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                transition={{ type: "spring", stiffness: 380, damping: 36 }}
               >
                 <SwipeToDelete canDelete={!cat.isDefault} onDelete={() => onDelete(cat.id)}>
-                  <CategoryItem cat={cat} isDragging={draggingId === cat.id}
+                  <CategoryItem
+                    cat={cat}
+                    isDragging={draggingId === cat.id}
                     onDragDown={e => onPointerDown(e, cat.id)}
                     onDragMove={e => onPointerMove(e, cat.id)}
-                    onDragUp={onPointerUp} onEdit={onEdit} />
+                    onDragUp={onPointerUp}
+                    onEdit={onEdit}
+                  />
                 </SwipeToDelete>
               </motion.div>
             ))}
           </AnimatePresence>
-        </motion.div>
+        </div>
       )}
     </div>
   );
 }
 
+// ─ Root ────────────────────────────────────────────────────────────────────
 export default function CategoryManager() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -214,22 +264,36 @@ export default function CategoryManager() {
   const exp = [...categories.filter(c => c.type==="expense")].sort((a,b) => a.sortOrder-b.sortOrder);
 
   const addM = useMutation({
-    mutationFn: async (d: {name:string;type:string;icon:string;color:string}) => (await apiRequest("POST","/api/categories",d)).json(),
-    onSuccess: () => { toast({title:"Категория создана"}); qc.invalidateQueries({queryKey:["/api/categories"]}); setAddOpen(false); setNewName(""); },
+    mutationFn: async (d: {name:string;type:string;icon:string;color:string}) =>
+      (await apiRequest("POST","/api/categories",d)).json(),
+    onSuccess: () => {
+      toast({title:"Категория создана"});
+      qc.invalidateQueries({queryKey:["/api/categories"]});
+      setAddOpen(false); setNewName("");
+    },
     onError: () => toast({title:"Ошибка создания",variant:"destructive"}),
   });
   const editM = useMutation({
-    mutationFn: async ({id,data}:{id:number;data:Partial<Category>}) => (await apiRequest("PATCH",`/api/categories/${id}`,data)).json(),
-    onSuccess: () => { toast({title:"Категория обновлена"}); qc.invalidateQueries({queryKey:["/api/categories"]}); setEditCat(null); },
+    mutationFn: async ({id,data}:{id:number;data:Partial<Category>}) =>
+      (await apiRequest("PATCH",`/api/categories/${id}`,data)).json(),
+    onSuccess: () => {
+      toast({title:"Категория обновлена"});
+      qc.invalidateQueries({queryKey:["/api/categories"]});
+      setEditCat(null);
+    },
     onError: () => toast({title:"Ошибка",variant:"destructive"}),
   });
   const delM = useMutation({
     mutationFn: async (id:number) => apiRequest("DELETE",`/api/categories/${id}`),
-    onSuccess: () => { toast({title:"Категория удалена"}); qc.invalidateQueries({queryKey:["/api/categories"]}); },
+    onSuccess: () => {
+      toast({title:"Категория удалена"});
+      qc.invalidateQueries({queryKey:["/api/categories"]});
+    },
     onError: () => toast({title:"Ошибка удаления",variant:"destructive"}),
   });
   const reorderM = useMutation({
-    mutationFn: async ({type,order}:{type:"income"|"expense";order:number[]}) => apiRequest("PATCH","/api/categories/reorder",{type,order}),
+    mutationFn: async ({type,order}:{type:"income"|"expense";order:number[]}) =>
+      apiRequest("PATCH","/api/categories/reorder",{type,order}),
     onSuccess: () => qc.invalidateQueries({queryKey:["/api/categories"]}),
   });
 
@@ -273,7 +337,9 @@ export default function CategoryManager() {
                 autoFocus />
             </div>
             <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(newColor,setNewColor)}</div>
-            <Button className="w-full" onClick={()=>addM.mutate({name:newName.trim(),type:addType,icon:"Tag",color:newColor})} disabled={!newName.trim()||addM.isPending}>
+            <Button className="w-full"
+              onClick={()=>addM.mutate({name:newName.trim(),type:addType,icon:"Tag",color:newColor})}
+              disabled={!newName.trim()||addM.isPending}>
               {addM.isPending?"Создаётся…":"Создать"}
             </Button>
           </div>
@@ -291,7 +357,9 @@ export default function CategoryManager() {
                 autoFocus />
             </div>
             <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(editColor,setEditColor)}</div>
-            <Button className="w-full" onClick={()=>editM.mutate({id:editCat!.id,data:{name:editName,color:editColor}})} disabled={!editName.trim()||editM.isPending}>
+            <Button className="w-full"
+              onClick={()=>editM.mutate({id:editCat!.id,data:{name:editName,color:editColor}})}
+              disabled={!editName.trim()||editM.isPending}>
               {editM.isPending?"Сохраняется…":"Сохранить"}
             </Button>
           </div>
