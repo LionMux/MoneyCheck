@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "npm exec -- drizzle-kit push",
-    "rebuild": "npm run clean-install && git pull origin main && rm -f package-lock.json && npm install --legacy-peer-deps && npm exec -- drizzle-kit push && npm exec -- tsx script/build.ts && pm2 restart moneycheck",
+    "rebuild": "git pull origin main && rm -f package-lock.json && npm install --legacy-peer-deps && npm exec -- drizzle-kit push && npm exec -- tsx script/build.ts && pm2 restart moneycheck && pm2 restart tg-bot",
     "clean-install": "rm -f package-lock.json && rm -rf node_modules && npm install --legacy-peer-deps"
   },
   "dependencies": {
