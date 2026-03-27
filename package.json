@@ -8,8 +8,8 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "node_modules/.bin/drizzle-kit push",
-    "rebuild": "git pull origin main && npm install --legacy-peer-deps && node_modules/.bin/drizzle-kit push && tsx script/build.ts && pm2 restart moneycheck"
+    "db:push": "npm exec -- drizzle-kit push",
+    "rebuild": "git pull origin main && npm install --legacy-peer-deps && npm exec -- drizzle-kit push && npm exec -- tsx script/build.ts && pm2 restart moneycheck"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
