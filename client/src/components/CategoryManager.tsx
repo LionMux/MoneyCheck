@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useCallback, createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -28,73 +28,112 @@ const COLOR_OPTIONS = [
   "#3BB273","#F18F01",
 ];
 
-const SWIPE_THRESHOLD = 90;
+// ─ Глобальный контекст: какой элемент сейчас открыт ────────────────────────
+const SwipeContext = createContext<{
+  openId: number | null;
+  setOpenId: (id: number | null) => void;
+}>({ openId: null, setOpenId: () => {} });
 
-// ─ SwipeToDelete ──────────────────────────────────────────────────────────
-function SwipeToDelete({ canDelete, onDelete, children }: {
-  canDelete: boolean; onDelete: () => void; children: React.ReactNode;
+// ─ iOS-стиль SwipeToDelete ───────────────────────────────────────────────
+const DELETE_BTN_W = 80; // ширина кнопки Удалить
+const OPEN_THRESHOLD = DELETE_BTN_W * 0.5; // порог раскрытия
+
+function SwipeToDelete({ id, canDelete, onDelete, children }: {
+  id: number; canDelete: boolean; onDelete: () => void; children: React.ReactNode;
 }) {
-  const [ox, setOx] = useState(0);
-  const oxRef = useRef(0);
+  const { openId, setOpenId } = useContext(SwipeContext);
+  const isOpen = openId === id;
+
+  // Текущее смещение: если открыто — -DELETE_BTN_W, иначе 0
+  const baseOffset = isOpen ? -DELETE_BTN_W : 0;
+
+  const [liveOx, setLiveOx] = useState(0); // дополнительное смещение во время свайпа
+  const [swiping, setSwiping] = useState(false);
+
   const sx = useRef(0);
   const sy = useRef(0);
+  const startBase = useRef(0);
   const active = useRef(false);
-  const dir = useRef<"x" | "y" | null>(null);
-  const isDragging = useRef(false);
+  const dir = useRef<'x' | 'y' | null>(null);
 
-  const setOffset = (v: number) => { oxRef.current = v; setOx(v); };
-  const opacity = Math.min(1, Math.abs(ox) / SWIPE_THRESHOLD);
+  const totalOx = baseOffset + liveOx;
 
-  const pd = (e: React.PointerEvent) => {
+  const onPD = (e: React.PointerEvent) => {
     if (!canDelete) return;
-    if ((e.target as HTMLElement).closest('[data-grip]')) return; // grip handles dnd
-    if ((e.target as HTMLElement).closest('button')) return;
-    sx.current = e.clientX; sy.current = e.clientY;
-    active.current = true; dir.current = null;
+    if ((e.target as HTMLElement).closest('[data-grip]')) return;
+    if ((e.target as HTMLElement).closest('[data-delete-btn]')) return;
+    sx.current = e.clientX;
+    sy.current = e.clientY;
+    startBase.current = baseOffset;
+    active.current = true;
+    dir.current = null;
     e.currentTarget.setPointerCapture(e.pointerId);
   };
-  const pm = (e: React.PointerEvent) => {
+
+  const onPM = (e: React.PointerEvent) => {
     if (!active.current) return;
-    const dx = e.clientX - sx.current, dy = e.clientY - sy.current;
+    const dx = e.clientX - sx.current;
+    const dy = e.clientY - sy.current;
     if (!dir.current) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      dir.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      dir.current = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
     }
-    if (dir.current === "y") { active.current = false; return; }
+    if (dir.current === 'y') { active.current = false; return; }
     e.preventDefault();
-    isDragging.current = true;
-    setOffset(Math.min(0, dx));
+    // зажимаем в пределах: от 0 до -DELETE_BTN_W
+    const clamped = Math.min(0, Math.max(-DELETE_BTN_W, startBase.current + dx));
+    if (!swiping) setSwiping(true);
+    setLiveOx(clamped - baseOffset);
   };
-  const pu = () => {
+
+  const onPU = () => {
     if (!active.current) return;
-    active.current = false; isDragging.current = false;
-    if (oxRef.current < -SWIPE_THRESHOLD) onDelete();
-    else {
-      setOffset(0);
+    active.current = false;
+    setSwiping(false);
+    setLiveOx(0);
+    // решаем: открыть или закрыть
+    const finalOx = baseOffset + liveOx;
+    if (finalOx < -OPEN_THRESHOLD) {
+      setOpenId(id);
+    } else {
+      setOpenId(null);
     }
   };
 
   if (!canDelete) return <>{children}</>;
+
   return (
-    <div className="relative overflow-hidden rounded-xl" style={{ touchAction: "pan-y" }}>
-      {/* Delete background */}
+    <div
+      className="relative rounded-xl overflow-hidden"
+      style={{ touchAction: 'pan-y' }}
+    >
+      {/* Кнопка Удалить — фиксирована справа */}
       <div
-        className="absolute inset-0 bg-destructive rounded-xl flex items-center justify-end pr-5 transition-opacity"
-        style={{ opacity }}
+        className="absolute top-0 right-0 h-full flex items-center justify-center bg-destructive"
+        style={{ width: DELETE_BTN_W }}
       >
-        <Trash2 size={20} className="text-white" />
+        <button
+          data-delete-btn
+          className="w-full h-full flex flex-col items-center justify-center gap-0.5 text-white"
+          onClick={() => { setOpenId(null); onDelete(); }}
+        >
+          <Trash2 size={18} />
+          <span className="text-xs font-medium">Удалить</span>
+        </button>
       </div>
-      {/* Swipeable content */}
+
+      {/* Плашка */}
       <div
         style={{
-          transform: `translateX(${ox}px)`,
-          transition: isDragging.current ? 'none' : 'transform 0.3s cubic-bezier(0.25,1,0.5,1)',
+          transform: `translateX(${totalOx}px)`,
+          transition: swiping ? 'none' : 'transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)',
           position: 'relative',
+          willChange: 'transform',
         }}
-        onPointerDown={pd}
-        onPointerMove={pm}
-        onPointerUp={pu}
-        onPointerCancel={pu}
+        onPointerDown={onPD}
+        onPointerMove={onPM}
+        onPointerUp={onPU}
+        onPointerCancel={onPU}
       >
         {children}
       </div>
@@ -102,18 +141,17 @@ function SwipeToDelete({ canDelete, onDelete, children }: {
   );
 }
 
-// ─ CategoryCard ───────────────────────────────────────────────────────────
+// ─ CategoryCard ────────────────────────────────────────────────────────────
 function CategoryCard({ cat, onEdit, overlay = false, dragHandleProps }: {
   cat: Category;
   onEdit?: (cat: Category) => void;
   overlay?: boolean;
-  dragHandleProps?: React.HTMLAttributes<HTMLDivElement> & { ref?: React.Ref<HTMLDivElement> };
+  dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }) {
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none
       ${overlay ? 'shadow-2xl ring-2 ring-primary/20 opacity-95 rotate-1 scale-105' : 'shadow-sm'}`}>
 
-      {/* Grip — drag handle, touch-action:none ONLY here */}
       <div
         data-grip
         {...dragHandleProps}
@@ -152,10 +190,9 @@ function SortableRow({ cat, onEdit, onDelete }: {
   onEdit: (cat: Category) => void;
   onDelete: (id: number) => void;
 }) {
-  const {
-    attributes, listeners, setNodeRef,
-    transform, transition, isDragging,
-  } = useSortable({ id: cat.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: cat.id });
+  const { setOpenId } = useContext(SwipeContext);
 
   return (
     <div
@@ -164,10 +201,11 @@ function SortableRow({ cat, onEdit, onDelete }: {
         transform: CSS.Transform.toString(transform),
         transition: transition ?? 'transform 200ms ease',
         opacity: isDragging ? 0 : 1,
-        position: 'relative',
       }}
+      // Закрываем свайп когда начинаем тащить
+      onDragStart={() => setOpenId(null)}
     >
-      <SwipeToDelete canDelete={!cat.isDefault} onDelete={() => onDelete(cat.id)}>
+      <SwipeToDelete id={cat.id} canDelete={!cat.isDefault} onDelete={() => onDelete(cat.id)}>
         <CategoryCard
           cat={cat}
           onEdit={onEdit}
@@ -190,8 +228,8 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
 }) {
   const [items, setItems] = useState<Category[]>(categories);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [openSwipeId, setOpenSwipeId] = useState<number | null>(null);
 
-  // sync from server
   const prevKey = useRef('');
   const curKey = categories.map(c => `${c.id}:${c.sortOrder}`).join(',');
   if (curKey !== prevKey.current) { prevKey.current = curKey; setItems(categories); }
@@ -199,18 +237,15 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
   const activeCat = activeId != null ? items.find(c => c.id === activeId) : null;
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 100, tolerance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const handleDragStart = (e: DragStartEvent) => setActiveId(e.active.id as number);
+  const handleDragStart = (e: DragStartEvent) => {
+    setActiveId(e.active.id as number);
+    setOpenSwipeId(null); // закрыть свайп при начале дрега
+  };
 
   const handleDragEnd = (e: DragEndEvent) => {
     setActiveId(null);
@@ -226,51 +261,46 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{title}</h3>
-        <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => onAdd(type)}>
-          <Plus size={13} /> Добавить
-        </Button>
-      </div>
-
-      {items.length === 0 ? (
-        <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">
-          Нет категорий
+    <SwipeContext.Provider value={{ openId: openSwipeId, setOpenId: setOpenSwipeId }}>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{title}</h3>
+          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => onAdd(type)}>
+            <Plus size={13} /> Добавить
+          </Button>
         </div>
-      ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext items={items.map(c => c.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-2">
-              {items.map(cat => (
-                <SortableRow
-                  key={cat.id}
-                  cat={cat}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                />
-              ))}
-            </div>
-          </SortableContext>
 
-          <DragOverlay
-            dropAnimation={{
-              duration: 200,
-              easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-            }}
+        {items.length === 0 ? (
+          <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">
+            Нет категорий
+          </div>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
           >
-            {activeCat && (
-              <CategoryCard cat={activeCat} overlay />
-            )}
-          </DragOverlay>
-        </DndContext>
-      )}
-    </div>
+            <SortableContext items={items.map(c => c.id)} strategy={verticalListSortingStrategy}>
+              <div className="flex flex-col gap-2">
+                {items.map(cat => (
+                  <SortableRow
+                    key={cat.id}
+                    cat={cat}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+
+            <DragOverlay dropAnimation={{ duration: 200, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
+              {activeCat && <CategoryCard cat={activeCat} overlay />}
+            </DragOverlay>
+          </DndContext>
+        )}
+      </div>
+    </SwipeContext.Provider>
   );
 }
 
@@ -360,64 +390,46 @@ export default function CategoryManager() {
         onAdd={t => { setAddType(t); setAddOpen(true); }}
       />
 
-      {/* Add dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Новая категория</DialogTitle>
-            <DialogDescription>
-              {addType === 'income' ? 'Категория доходов' : 'Категория расходов'}
-            </DialogDescription>
+            <DialogDescription>{addType === 'income' ? 'Категория доходов' : 'Категория расходов'}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Название</label>
               <Input
                 placeholder="Например: Кафе, Аренда…"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
+                value={newName} onChange={e => setNewName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addM.mutate({ name: newName.trim(), type: addType, icon: 'Tag', color: newColor })}
                 autoFocus
               />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Цвет</label>
-              {colorPicker(newColor, setNewColor)}
-            </div>
-            <Button
-              className="w-full"
+            <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(newColor, setNewColor)}</div>
+            <Button className="w-full"
               onClick={() => addM.mutate({ name: newName.trim(), type: addType, icon: 'Tag', color: newColor })}
-              disabled={!newName.trim() || addM.isPending}
-            >
+              disabled={!newName.trim() || addM.isPending}>
               {addM.isPending ? 'Создаётся…' : 'Создать'}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Edit dialog */}
       <Dialog open={!!editCat} onOpenChange={o => { if (!o) setEditCat(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Редактировать категорию</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Название</label>
-              <Input
-                value={editName}
-                onChange={e => setEditName(e.target.value)}
+              <Input value={editName} onChange={e => setEditName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && editM.mutate({ id: editCat!.id, data: { name: editName, color: editColor } })}
-                autoFocus
-              />
+                autoFocus />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Цвет</label>
-              {colorPicker(editColor, setEditColor)}
-            </div>
-            <Button
-              className="w-full"
+            <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(editColor, setEditColor)}</div>
+            <Button className="w-full"
               onClick={() => editM.mutate({ id: editCat!.id, data: { name: editName, color: editColor } })}
-              disabled={!editName.trim() || editM.isPending}
-            >
+              disabled={!editName.trim() || editM.isPending}>
               {editM.isPending ? 'Сохраняется…' : 'Сохранить'}
             </Button>
           </div>
