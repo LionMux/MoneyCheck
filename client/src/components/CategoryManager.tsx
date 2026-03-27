@@ -118,7 +118,7 @@ function CategoryCard({ cat, onEdit, overlay = false }: {
   );
 }
 
-// ─ SortableRow (wraps CategoryCard with dnd-kit sortable) ────────────
+// ─ SortableRow ────────────────────────────────────────────────────
 function SortableRow({ cat, onEdit, onDelete }: {
   cat: Category; onEdit: (cat: Category) => void; onDelete: (id: number) => void;
 }) {
@@ -128,8 +128,8 @@ function SortableRow({ cat, onEdit, onDelete }: {
   const style = {
     transform: CSS.Transform.toString(transform),
     transition: transition ?? "transform 200ms cubic-bezier(0.25, 1, 0.5, 1)",
-    opacity: isDragging ? 0 : 1, // hide original while overlay is shown
-    zIndex: isDragging ? 10 : "auto" as any,
+    opacity: isDragging ? 0 : 1,
+    zIndex: isDragging ? 10 : ("auto" as any),
   };
 
   return (
@@ -137,7 +137,6 @@ function SortableRow({ cat, onEdit, onDelete }: {
       <SwipeToDelete canDelete={!cat.isDefault} onDelete={() => onDelete(cat.id)}>
         <div {...attributes}>
           <CategoryCard cat={cat} onEdit={onEdit} />
-          {/* Invisible drag handle layer over the grip icon area */}
           <div {...listeners}
             className="absolute left-0 top-0 w-10 h-full cursor-grab active:cursor-grabbing"
             style={{ touchAction: "none" }}
@@ -158,7 +157,6 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
   const [items, setItems] = useState<Category[]>(categories);
   const [activeId, setActiveId] = useState<number | null>(null);
 
-  // Sync when server data changes
   const prevKey = useRef("");
   const curKey = categories.map(c => `${c.id}:${c.sortOrder}`).join(",");
   if (curKey !== prevKey.current) { prevKey.current = curKey; setItems(categories); }
@@ -167,7 +165,7 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
   );
 
   const handleDragStart = (e: DragStartEvent) => setActiveId(e.active.id as number);
@@ -202,11 +200,13 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
             <div className="flex flex-col gap-2">
               <AnimatePresence initial={false}>
                 {items.map(cat => (
-                  <motion.div key={cat.id}
+                  <motion.div
+                    key={cat.id}
                     initial={{ opacity: 0, scale: 0.95, y: -4 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.9, x: -60, transition: { duration: 0.2 } }}
                     transition={{ type: "spring", stiffness: 400, damping: 38 }}
+                    layout={false}
                   >
                     <SortableRow cat={cat} onEdit={onEdit} onDelete={onDelete} />
                   </motion.div>
