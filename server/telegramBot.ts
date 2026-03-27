@@ -127,25 +127,27 @@ bot.on('callback_query', async (query) => {
 
   if (query.data === "rebuild") {
     bot.editMessageText(
-      `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЭто может занять до 10 минут при чистой установке`,
+      `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЖди сообщение о завершении...`,
       { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
     );
 
     const start = Date.now();
-    exec(`cd ${ROOT_DIR} && npm run rebuild`, { timeout: 600000 }, (error, stdout, stderr) => {
+    exec(`cd ${ROOT_DIR} && npm run rebuild`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       const elapsed = Math.round((Date.now() - start) / 1000);
 
       if (error) {
-        bot.editMessageText(
+        bot.sendMessage(
+          chatId,
           `❌ *Rebuild завершился с ошибкой* (${elapsed}s)\n\n\`\`\`\n${(stderr || error.message).slice(-1000)}\n\`\`\``,
-          { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+          { parse_mode: "Markdown", ...mainMenu }
         );
         return;
       }
 
-      bot.editMessageText(
+      bot.sendMessage(
+        chatId,
         `✅ *Сервер успешно пересобран!*\n\n⏱ Время: ${elapsed} сек\n\nВсе изменения применены и сервер перезапущен.`,
-        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+        { parse_mode: "Markdown", ...mainMenu }
       );
     });
   }
