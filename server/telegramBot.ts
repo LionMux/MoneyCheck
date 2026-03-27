@@ -4,6 +4,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import { exec } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from 'fs';
 import si from 'systeminformation';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,25 +40,27 @@ const mainMenu = {
   }
 };
 
-// ── При старте бота ─ сообщаем админу что перезапустился
+// ── Флаг-файл хранит chatId + msgId чтобы после рестарта отредактировать то же сообщение
 const RESTART_FLAG = path.join(ROOT_DIR, '.bot_restarted');
-import fs from 'fs';
 
 if (fs.existsSync(RESTART_FLAG)) {
-  fs.unlinkSync(RESTART_FLAG);
-  // Даём polling немного времени подняться
-  setTimeout(() => {
-    bot.sendMessage(ADMIN_ID,
-      `✅ *tg-bot успешно перезапущен!*\n\n🤖 Бот снова в сети и готов к работе.`,
-      { parse_mode: "Markdown", ...mainMenu }
-    );
-  }, 2000);
+  try {
+    const { chatId, msgId, elapsed } = JSON.parse(fs.readFileSync(RESTART_FLAG, 'utf-8'));
+    fs.unlinkSync(RESTART_FLAG);
+    setTimeout(() => {
+      bot.editMessageText(
+        `✅ *tg-bot успешно перезапущен!*\n\n⏱ Время: ${elapsed} сек\n🤖 Бот снова в сети.`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+      );
+    }, 2000);
+  } catch {
+    fs.unlinkSync(RESTART_FLAG);
+  }
 }
 
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   if (!isAdmin(chatId)) return bot.sendMessage(chatId, "⛔ Доступ запрещён");
-
   bot.sendMessage(chatId,
     `👋 *MoneyCheck Control Panel*\n\nУправляй сервером прямо из Telegram.\nВыбери действие:`,
     { parse_mode: "Markdown", ...mainMenu }
@@ -67,7 +70,6 @@ bot.onText(/\/start/, (msg) => {
 function formatStatus(raw: string): string {
   const lines = raw.split('\n').filter(l => l.includes('online') || l.includes('stopped') || l.includes('errored'));
   if (!lines.length) return '❓ Нет данных';
-
   return lines.map(line => {
     const isOnline = line.includes('online');
     const isErrored = line.includes('errored');
@@ -94,15 +96,29 @@ bot.on('callback_query', async (query) => {
   bot.answerCallbackQuery(query.id);
 
   if (query.data === "restart_bot") {
+    const start = Date.now();
+
     bot.editMessageText(
-      `⏳ *Restart tg-bot...*\n\nБот перезапускается. Получишь сообщение как только встанет.`,
+      `⏳ *Restart tg-bot...*\n\n\`git pull → restart\`\n\nЖди сообщение о завершении...`,
       { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
     );
-    // Создаём флаг — после рестарта бот его обнаружит и отправит сообщение
-    setTimeout(() => {
-      fs.writeFileSync(RESTART_FLAG, Date.now().toString());
-      exec('pm2 restart tg-bot');
-    }, 500);
+
+    // git pull перед рестартом
+    exec(`cd ${ROOT_DIR} && git pull origin main`, (error, stdout, stderr) => {
+      const elapsed = Math.round((Date.now() - start) / 1000);
+
+      if (error) {
+        bot.editMessageText(
+          `❌ *git pull завершился с ошибкой*\n\n\`\`\`\n${(stderr || error.message).slice(-800)}\n\`\`\``,
+          { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+        );
+        return;
+      }
+
+      // Сохраняем chatId, msgId и elapsed в флаг-файл
+      fs.writeFileSync(RESTART_FLAG, JSON.stringify({ chatId, msgId, elapsed }));
+      exec('pm2 restart tg-bot'); // бот умирает здесь
+    });
     return;
   }
 
@@ -128,13 +144,8 @@ bot.on('callback_query', async (query) => {
 
   if (query.data === "stats") {
     const [cpu, mem, temp, disk, load] = await Promise.all([
-      si.cpu(),
-      si.mem(),
-      si.cpuTemperature(),
-      si.fsSize(),
-      si.currentLoad()
+      si.cpu(), si.mem(), si.cpuTemperature(), si.fsSize(), si.currentLoad()
     ]);
-
     const memUsed = (mem.active / mem.total * 100).toFixed(1);
     const memUsedGb = (mem.active / 1024 / 1024 / 1024).toFixed(1);
     const memTotalGb = (mem.total / 1024 / 1024 / 1024).toFixed(1);
@@ -146,7 +157,6 @@ bot.on('callback_query', async (query) => {
     const time = si.time();
     const uptimeH = Math.floor(time.uptime / 3600);
     const uptimeM = Math.floor((time.uptime % 3600) / 60);
-
     bot.editMessageText(
       `🖥️ *Состояние сервера*\n\n` +
       `🔲 *CPU:* ${cpu.manufacturer} ${cpu.brand}\n` +
@@ -164,22 +174,17 @@ bot.on('callback_query', async (query) => {
       `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЖди сообщение о завершении...`,
       { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
     );
-
     const start = Date.now();
     exec(`cd ${ROOT_DIR} && npm run rebuild`, { maxBuffer: 1024 * 1024 * 10, timeout: 0 }, (error, stdout, stderr) => {
       const elapsed = Math.round((Date.now() - start) / 1000);
-
       if (error) {
-        bot.sendMessage(
-          chatId,
+        bot.sendMessage(chatId,
           `❌ *Rebuild завершился с ошибкой* (${elapsed}s)\n\n\`\`\`\n${(stderr || error.message).slice(-1000)}\n\`\`\``,
           { parse_mode: "Markdown", ...mainMenu }
         );
         return;
       }
-
-      bot.sendMessage(
-        chatId,
+      bot.sendMessage(chatId,
         `✅ *Сервер успешно пересобран!*\n\n⏱ Время: ${elapsed} сек\n\nВсе изменения применены и сервер перезапущен.`,
         { parse_mode: "Markdown", ...mainMenu }
       );
