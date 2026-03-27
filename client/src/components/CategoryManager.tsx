@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, createContext, useContext } from "react";
+import { useState, useRef, createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -28,28 +28,25 @@ const COLOR_OPTIONS = [
   "#3BB273","#F18F01",
 ];
 
-// ─ Глобальный контекст: какой элемент сейчас открыт ────────────────────────
+// ─ Контекст для синхронизации открытого свайпа ──────────────────────────────
 const SwipeContext = createContext<{
   openId: number | null;
   setOpenId: (id: number | null) => void;
 }>({ openId: null, setOpenId: () => {} });
 
-// ─ iOS-стиль SwipeToDelete ───────────────────────────────────────────────
-const DELETE_BTN_W = 80; // ширина кнопки Удалить
-const OPEN_THRESHOLD = DELETE_BTN_W * 0.5; // порог раскрытия
+// ─ iOS-свайп ─ только на тачскринах ────────────────────────────────────────────
+const DELETE_BTN_W = 80;
+const OPEN_THRESHOLD = DELETE_BTN_W * 0.5;
 
-function SwipeToDelete({ id, canDelete, onDelete, children }: {
-  id: number; canDelete: boolean; onDelete: () => void; children: React.ReactNode;
+function SwipeToDelete({ id, onDelete, children }: {
+  id: number; onDelete: () => void; children: React.ReactNode;
 }) {
   const { openId, setOpenId } = useContext(SwipeContext);
   const isOpen = openId === id;
-
-  // Текущее смещение: если открыто — -DELETE_BTN_W, иначе 0
   const baseOffset = isOpen ? -DELETE_BTN_W : 0;
 
-  const [liveOx, setLiveOx] = useState(0); // дополнительное смещение во время свайпа
+  const [liveOx, setLiveOx] = useState(0);
   const [swiping, setSwiping] = useState(false);
-
   const sx = useRef(0);
   const sy = useRef(0);
   const startBase = useRef(0);
@@ -59,7 +56,6 @@ function SwipeToDelete({ id, canDelete, onDelete, children }: {
   const totalOx = baseOffset + liveOx;
 
   const onPD = (e: React.PointerEvent) => {
-    if (!canDelete) return;
     if ((e.target as HTMLElement).closest('[data-grip]')) return;
     if ((e.target as HTMLElement).closest('[data-delete-btn]')) return;
     sx.current = e.clientX;
@@ -69,7 +65,6 @@ function SwipeToDelete({ id, canDelete, onDelete, children }: {
     dir.current = null;
     e.currentTarget.setPointerCapture(e.pointerId);
   };
-
   const onPM = (e: React.PointerEvent) => {
     if (!active.current) return;
     const dx = e.clientX - sx.current;
@@ -80,36 +75,24 @@ function SwipeToDelete({ id, canDelete, onDelete, children }: {
     }
     if (dir.current === 'y') { active.current = false; return; }
     e.preventDefault();
-    // зажимаем в пределах: от 0 до -DELETE_BTN_W
     const clamped = Math.min(0, Math.max(-DELETE_BTN_W, startBase.current + dx));
     if (!swiping) setSwiping(true);
     setLiveOx(clamped - baseOffset);
   };
-
   const onPU = () => {
     if (!active.current) return;
     active.current = false;
     setSwiping(false);
-    setLiveOx(0);
-    // решаем: открыть или закрыть
     const finalOx = baseOffset + liveOx;
-    if (finalOx < -OPEN_THRESHOLD) {
-      setOpenId(id);
-    } else {
-      setOpenId(null);
-    }
+    setLiveOx(0);
+    setOpenId(finalOx < -OPEN_THRESHOLD ? id : null);
   };
 
-  if (!canDelete) return <>{children}</>;
-
   return (
-    <div
-      className="relative rounded-xl overflow-hidden"
-      style={{ touchAction: 'pan-y' }}
-    >
-      {/* Кнопка Удалить — фиксирована справа */}
+    <div className="relative rounded-xl overflow-hidden md:overflow-visible" style={{ touchAction: 'pan-y' }}>
+      {/* Кнопка Удалить — только на мобайле */}
       <div
-        className="absolute top-0 right-0 h-full flex items-center justify-center bg-destructive"
+        className="absolute top-0 right-0 h-full flex items-center justify-center bg-destructive rounded-r-xl md:hidden"
         style={{ width: DELETE_BTN_W }}
       >
         <button
@@ -122,12 +105,12 @@ function SwipeToDelete({ id, canDelete, onDelete, children }: {
         </button>
       </div>
 
-      {/* Плашка */}
+      {/* Плашка — на мобайле свайпается, на десктопе стоит неподвижно */}
       <div
+        className="relative md:transform-none"
         style={{
           transform: `translateX(${totalOx}px)`,
           transition: swiping ? 'none' : 'transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)',
-          position: 'relative',
           willChange: 'transform',
         }}
         onPointerDown={onPD}
@@ -142,9 +125,10 @@ function SwipeToDelete({ id, canDelete, onDelete, children }: {
 }
 
 // ─ CategoryCard ────────────────────────────────────────────────────────────
-function CategoryCard({ cat, onEdit, overlay = false, dragHandleProps }: {
+function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps }: {
   cat: Category;
   onEdit?: (cat: Category) => void;
+  onDelete?: () => void;
   overlay?: boolean;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }) {
@@ -152,15 +136,17 @@ function CategoryCard({ cat, onEdit, overlay = false, dragHandleProps }: {
     <div className={`flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none
       ${overlay ? 'shadow-2xl ring-2 ring-primary/20 opacity-95 rotate-1 scale-105' : 'shadow-sm'}`}>
 
+      {/* Grip */}
       <div
         data-grip
         {...dragHandleProps}
-        className="p-1 -ml-1 flex-shrink-0 text-muted-foreground/50 hover:text-muted-foreground cursor-grab active:cursor-grabbing"
+        className="p-1 -ml-1 flex-shrink-0 text-muted-foreground/40 hover:text-muted-foreground cursor-grab active:cursor-grabbing"
         style={{ touchAction: 'none' }}
       >
         <GripVertical size={18} />
       </div>
 
+      {/* Цветной кружок */}
       <div
         className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
         style={{ backgroundColor: cat.color }}
@@ -170,16 +156,31 @@ function CategoryCard({ cat, onEdit, overlay = false, dragHandleProps }: {
 
       <span className="flex-1 text-sm font-medium truncate">{cat.name}</span>
 
-      {!cat.isDefault && onEdit && (
-        <Button
-          variant="ghost" size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground flex-shrink-0"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => { e.stopPropagation(); onEdit(cat); }}
-        >
-          <Pencil size={13} />
-        </Button>
-      )}
+      {/* Правые кнопки */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {/* Кнопка редактирования */}
+        {onEdit && (
+          <Button
+            variant="ghost" size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onEdit(cat); }}
+          >
+            <Pencil size={13} />
+          </Button>
+        )}
+        {/* Корзинка — только на десктопе */}
+        {onDelete && (
+          <Button
+            variant="ghost" size="icon"
+            className="hidden md:flex h-7 w-7 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors duration-200"
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+          >
+            <Trash2 size={14} />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -202,13 +203,13 @@ function SortableRow({ cat, onEdit, onDelete }: {
         transition: transition ?? 'transform 200ms ease',
         opacity: isDragging ? 0 : 1,
       }}
-      // Закрываем свайп когда начинаем тащить
       onDragStart={() => setOpenId(null)}
     >
-      <SwipeToDelete id={cat.id} canDelete={!cat.isDefault} onDelete={() => onDelete(cat.id)}>
+      <SwipeToDelete id={cat.id} onDelete={() => onDelete(cat.id)}>
         <CategoryCard
           cat={cat}
           onEdit={onEdit}
+          onDelete={() => onDelete(cat.id)}
           dragHandleProps={{ ...attributes, ...listeners } as any}
         />
       </SwipeToDelete>
@@ -244,9 +245,8 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
 
   const handleDragStart = (e: DragStartEvent) => {
     setActiveId(e.active.id as number);
-    setOpenSwipeId(null); // закрыть свайп при начале дрега
+    setOpenSwipeId(null);
   };
-
   const handleDragEnd = (e: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = e;
@@ -271,9 +271,7 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
         </div>
 
         {items.length === 0 ? (
-          <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">
-            Нет категорий
-          </div>
+          <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">Нет категорий</div>
         ) : (
           <DndContext
             sensors={sensors}
@@ -284,16 +282,10 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
             <SortableContext items={items.map(c => c.id)} strategy={verticalListSortingStrategy}>
               <div className="flex flex-col gap-2">
                 {items.map(cat => (
-                  <SortableRow
-                    key={cat.id}
-                    cat={cat}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                  />
+                  <SortableRow key={cat.id} cat={cat} onEdit={onEdit} onDelete={onDelete} />
                 ))}
               </div>
             </SortableContext>
-
             <DragOverlay dropAnimation={{ duration: 200, easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)' }}>
               {activeCat && <CategoryCard cat={activeCat} overlay />}
             </DragOverlay>
@@ -323,34 +315,20 @@ export default function CategoryManager() {
   const addM = useMutation({
     mutationFn: async (d: { name: string; type: string; icon: string; color: string }) =>
       (await apiRequest('POST', '/api/categories', d)).json(),
-    onSuccess: () => {
-      toast({ title: 'Категория создана' });
-      qc.invalidateQueries({ queryKey: ['/api/categories'] });
-      setAddOpen(false); setNewName('');
-    },
+    onSuccess: () => { toast({ title: 'Категория создана' }); qc.invalidateQueries({ queryKey: ['/api/categories'] }); setAddOpen(false); setNewName(''); },
     onError: () => toast({ title: 'Ошибка создания', variant: 'destructive' }),
   });
-
   const editM = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<Category> }) =>
       (await apiRequest('PATCH', `/api/categories/${id}`, data)).json(),
-    onSuccess: () => {
-      toast({ title: 'Категория обновлена' });
-      qc.invalidateQueries({ queryKey: ['/api/categories'] });
-      setEditCat(null);
-    },
+    onSuccess: () => { toast({ title: 'Категория обновлена' }); qc.invalidateQueries({ queryKey: ['/api/categories'] }); setEditCat(null); },
     onError: () => toast({ title: 'Ошибка', variant: 'destructive' }),
   });
-
   const delM = useMutation({
     mutationFn: async (id: number) => apiRequest('DELETE', `/api/categories/${id}`),
-    onSuccess: () => {
-      toast({ title: 'Категория удалена' });
-      qc.invalidateQueries({ queryKey: ['/api/categories'] });
-    },
+    onSuccess: () => { toast({ title: 'Категория удалена' }); qc.invalidateQueries({ queryKey: ['/api/categories'] }); },
     onError: () => toast({ title: 'Ошибка удаления', variant: 'destructive' }),
   });
-
   const reorderM = useMutation({
     mutationFn: async ({ type, order }: { type: 'income' | 'expense'; order: number[] }) =>
       apiRequest('PATCH', '/api/categories/reorder', { type, order }),
@@ -362,33 +340,27 @@ export default function CategoryManager() {
   const colorPicker = (selected: string, onSelect: (c: string) => void) => (
     <div className="flex flex-wrap gap-2">
       {COLOR_OPTIONS.map(c => (
-        <button
-          key={c} type="button" onClick={() => onSelect(c)}
+        <button key={c} type="button" onClick={() => onSelect(c)}
           className={`w-7 h-7 rounded-full border-2 transition-transform ${
             selected === c ? 'border-foreground scale-110' : 'border-transparent'
           }`}
-          style={{ backgroundColor: c }}
-        />
+          style={{ backgroundColor: c }} />
       ))}
     </div>
   );
 
   return (
     <div className="space-y-6">
-      <CategorySection
-        title="Доходы" type="income" categories={inc}
+      <CategorySection title="Доходы" type="income" categories={inc}
         onReorder={(t, o) => reorderM.mutate({ type: t, order: o })}
         onEdit={cat => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
         onDelete={id => delM.mutate(id)}
-        onAdd={t => { setAddType(t); setAddOpen(true); }}
-      />
-      <CategorySection
-        title="Расходы" type="expense" categories={exp}
+        onAdd={t => { setAddType(t); setAddOpen(true); }} />
+      <CategorySection title="Расходы" type="expense" categories={exp}
         onReorder={(t, o) => reorderM.mutate({ type: t, order: o })}
         onEdit={cat => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
         onDelete={id => delM.mutate(id)}
-        onAdd={t => { setAddType(t); setAddOpen(true); }}
-      />
+        onAdd={t => { setAddType(t); setAddOpen(true); }} />
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-sm">
@@ -399,12 +371,10 @@ export default function CategoryManager() {
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Название</label>
-              <Input
-                placeholder="Например: Кафе, Аренда…"
-                value={newName} onChange={e => setNewName(e.target.value)}
+              <Input placeholder="Например: Кафе, Аренда…" value={newName}
+                onChange={e => setNewName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addM.mutate({ name: newName.trim(), type: addType, icon: 'Tag', color: newColor })}
-                autoFocus
-              />
+                autoFocus />
             </div>
             <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(newColor, setNewColor)}</div>
             <Button className="w-full"
