@@ -127,12 +127,12 @@ bot.on('callback_query', async (query) => {
 
   if (query.data === "rebuild") {
     bot.editMessageText(
-      `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЭто займёт ~30-60 секунд`,
+      `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЭто может занять до 10 минут при чистой установке`,
       { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
     );
 
     const start = Date.now();
-    exec(`cd ${ROOT_DIR} && npm run rebuild`, { timeout: 180000 }, (error, stdout, stderr) => {
+    exec(`cd ${ROOT_DIR} && npm run rebuild`, { timeout: 600000 }, (error, stdout, stderr) => {
       const elapsed = Math.round((Date.now() - start) / 1000);
 
       if (error) {
