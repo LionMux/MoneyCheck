@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 import TelegramBot from "node-telegram-bot-api";
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { exec } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -16,7 +17,11 @@ console.log("TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "✅ " +
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const ADMIN_ID = Number(process.env.TELEGRAM_ADMIN_ID!);
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const proxyAgent = new HttpsProxyAgent('http://127.0.0.1:12334');
+const bot = new TelegramBot(BOT_TOKEN, {
+  polling: true,
+  request: { agent: proxyAgent }
+});
 
 function isAdmin(chatId: number): boolean {
   return chatId === ADMIN_ID;
@@ -132,7 +137,7 @@ bot.on('callback_query', async (query) => {
     );
 
     const start = Date.now();
-    exec(`cd ${ROOT_DIR} && npm run rebuild`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    exec(`cd ${ROOT_DIR} && npm run rebuild`, { maxBuffer: 1024 * 1024 * 10, timeout: 0 }, (error, stdout, stderr) => {
       const elapsed = Math.round((Date.now() - start) / 1000);
 
       if (error) {
