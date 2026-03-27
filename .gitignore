@@ -4,6 +4,7 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+package-lock.json
 
 # Electron build artifacts
 widgets/windows/out/
