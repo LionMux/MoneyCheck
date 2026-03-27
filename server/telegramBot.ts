@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
 
 config({ path: path.join(ROOT_DIR, '.env') });
-console.log("TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "✅ " + 
+console.log("TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "✅ " +
   process.env.TELEGRAM_BOT_TOKEN.slice(0, 10) + "..." : "❌ пустой");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
@@ -31,12 +31,28 @@ const mainMenu = {
   reply_markup: {
     inline_keyboard: [
       [{ text: "🔄 Rebuild сервера", callback_data: "rebuild" }],
+      [{ text: "🤖 Restart tg-bot", callback_data: "restart_bot" }],
       [{ text: "📊 Статус процессов", callback_data: "status" }],
       [{ text: "🖥️ Железо сервера", callback_data: "stats" }],
       [{ text: "📋 Последние логи", callback_data: "logs" }],
     ]
   }
 };
+
+// ── При старте бота ─ сообщаем админу что перезапустился
+const RESTART_FLAG = path.join(ROOT_DIR, '.bot_restarted');
+import fs from 'fs';
+
+if (fs.existsSync(RESTART_FLAG)) {
+  fs.unlinkSync(RESTART_FLAG);
+  // Даём polling немного времени подняться
+  setTimeout(() => {
+    bot.sendMessage(ADMIN_ID,
+      `✅ *tg-bot успешно перезапущен!*\n\n🤖 Бот снова в сети и готов к работе.`,
+      { parse_mode: "Markdown", ...mainMenu }
+    );
+  }, 2000);
+}
 
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
@@ -76,6 +92,19 @@ bot.on('callback_query', async (query) => {
   }
 
   bot.answerCallbackQuery(query.id);
+
+  if (query.data === "restart_bot") {
+    bot.editMessageText(
+      `⏳ *Restart tg-bot...*\n\nБот перезапускается. Получишь сообщение как только встанет.`,
+      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+    );
+    // Создаём флаг — после рестарта бот его обнаружит и отправит сообщение
+    setTimeout(() => {
+      fs.writeFileSync(RESTART_FLAG, Date.now().toString());
+      exec('pm2 restart tg-bot');
+    }, 500);
+    return;
+  }
 
   if (query.data === "status") {
     exec("pm2 list --no-color", (_, stdout) => {
