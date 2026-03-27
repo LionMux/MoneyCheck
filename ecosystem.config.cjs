@@ -16,6 +16,8 @@ module.exports = {
       script: "node_modules/tsx/dist/cli.mjs",
       interpreter: "node",
       args: "server/telegramBot.ts",
+      watch: ["server/telegramBot.ts"],
+      ignore_watch: ["node_modules", "dist"],
       env: {
         NODE_ENV: "production",
         TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
