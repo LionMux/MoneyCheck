@@ -2,202 +2,152 @@ import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { GripVertical, Plus, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog, DialogContent, DialogHeader,
-  DialogTitle, DialogDescription
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface Category {
-  id: number;
-  name: string;
-  type: string;
-  icon: string;
-  color: string;
-  isDefault: boolean;
-  sortOrder: number;
+  id: number; name: string; type: string; icon: string;
+  color: string; isDefault: boolean; sortOrder: number;
 }
 
 const COLOR_OPTIONS = [
-  "#20808D", "#437A22", "#A84B2F", "#7A39BB", "#D19900",
-  "#006494", "#944454", "#848456", "#2E86AB", "#E84855",
-  "#3BB273", "#F18F01",
+  "#20808D","#437A22","#A84B2F","#7A39BB","#D19900",
+  "#006494","#944454","#848456","#2E86AB","#E84855",
+  "#3BB273","#F18F01",
 ];
 
-// ─── useDragSort hook ──────────────────────────────────────────────────────
+const SWIPE_THRESHOLD = 90;
 
 function useDragSort(initial: Category[], onCommit: (order: number[]) => void) {
   const [items, setItems] = useState<Category[]>(initial);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const pointerStartY = useRef(0);
-  const itemHeightRef = useRef(0);
+  const startY = useRef(0);
+  const itemH = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
-
-  const prevKey = useRef(initial.map(c => `${c.id}:${c.name}:${c.color}`).join(","));
+  const prevKey = useRef("");
   const curKey = initial.map(c => `${c.id}:${c.name}:${c.color}`).join(",");
-  if (curKey !== prevKey.current) {
-    prevKey.current = curKey;
-    setItems(initial);
-  }
+  if (curKey !== prevKey.current) { prevKey.current = curKey; setItems(initial); }
 
   const onPointerDown = useCallback((e: React.PointerEvent, id: number) => {
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    pointerStartY.current = e.clientY;
+    startY.current = e.clientY;
     if (listRef.current) {
-      const first = listRef.current.children[0] as HTMLElement;
-      if (first) itemHeightRef.current = first.getBoundingClientRect().height + 8;
+      const el = listRef.current.children[0] as HTMLElement;
+      if (el) itemH.current = el.getBoundingClientRect().height + 8;
     }
     setDraggingId(id);
   }, []);
 
   const onPointerMove = useCallback((e: React.PointerEvent, id: number) => {
     if (draggingId !== id) return;
-    const dy = e.clientY - pointerStartY.current;
-    const steps = Math.round(dy / (itemHeightRef.current || 60));
-    if (steps === 0) return;
+    const steps = Math.round((e.clientY - startY.current) / (itemH.current || 60));
+    if (!steps) return;
     setItems(prev => {
       const idx = prev.findIndex(c => c.id === id);
       if (idx === -1) return prev;
-      const newIdx = Math.max(0, Math.min(prev.length - 1, idx + steps));
-      if (newIdx === idx) return prev;
+      const ni = Math.max(0, Math.min(prev.length - 1, idx + steps));
+      if (ni === idx) return prev;
       const next = [...prev];
-      const [moved] = next.splice(idx, 1);
-      next.splice(newIdx, 0, moved);
-      pointerStartY.current = e.clientY;
+      const [m] = next.splice(idx, 1);
+      next.splice(ni, 0, m);
+      startY.current = e.clientY;
       return next;
     });
   }, [draggingId]);
 
   const onPointerUp = useCallback(() => {
-    if (draggingId !== null) {
-      setItems(prev => { onCommit(prev.map(c => c.id)); return prev; });
-    }
+    if (draggingId !== null) setItems(prev => { onCommit(prev.map(c => c.id)); return prev; });
     setDraggingId(null);
   }, [draggingId, onCommit]);
 
   return { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp };
 }
 
-// ─── SwipeToDelete wrapper ───────────────────────────────────────────────
-
-const DELETE_THRESHOLD = 80;
-
-function SwipeToDelete({
-  canDelete,
-  onDelete,
-  children,
-}: {
-  canDelete: boolean;
-  onDelete: () => void;
-  children: React.ReactNode;
+function SwipeToDelete({ canDelete, onDelete, children }: {
+  canDelete: boolean; onDelete: () => void; children: React.ReactNode;
 }) {
-  const x = useMotionValue(0);
-  const deleteOpacity = useTransform(x, [-DELETE_THRESHOLD, -DELETE_THRESHOLD / 2], [1, 0]);
-  const deleteScale = useTransform(x, [-DELETE_THRESHOLD, -DELETE_THRESHOLD / 2], [1, 0.7]);
-  const cardOpacity = useTransform(x, [-DELETE_THRESHOLD * 1.5, -DELETE_THRESHOLD], [0, 1]);
+  const [ox, setOx] = useState(0);
+  const sx = useRef(0); const sy = useRef(0);
+  const active = useRef(false); const dir = useRef<"x"|"y"|null>(null);
+  const opacity = Math.min(1, Math.abs(ox) / SWIPE_THRESHOLD);
 
-  const handleDragEnd = () => {
-    if (x.get() < -DELETE_THRESHOLD) {
-      onDelete();
-    } else {
-      // snap back
-      x.set(0);
+  const pd = (e: React.PointerEvent) => {
+    if (!canDelete) return;
+    sx.current = e.clientX; sy.current = e.clientY;
+    active.current = true; dir.current = null;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const pm = (e: React.PointerEvent) => {
+    if (!active.current) return;
+    const dx = e.clientX - sx.current, dy = e.clientY - sy.current;
+    if (!dir.current) {
+      if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      dir.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
     }
+    if (dir.current === "y") return;
+    e.preventDefault();
+    setOx(Math.min(0, dx));
+  };
+  const pu = () => {
+    if (!active.current) return;
+    active.current = false;
+    if (ox < -SWIPE_THRESHOLD) onDelete(); else setOx(0);
   };
 
   if (!canDelete) return <>{children}</>;
-
   return (
-    <div className="relative overflow-hidden rounded-xl">
-      {/* Red background with trash icon */}
-      <motion.div
-        className="absolute inset-0 bg-destructive rounded-xl flex items-center justify-end pr-4"
-        style={{ opacity: deleteOpacity }}
-      >
-        <motion.div style={{ scale: deleteScale }}>
+    <div className="relative overflow-hidden rounded-xl" style={{ touchAction: "pan-y" }}>
+      <div className="absolute inset-0 bg-destructive rounded-xl flex items-center justify-end pr-5" style={{ opacity }}>
+        <motion.div animate={{ scale: 0.65 + 0.35 * opacity }} transition={{ type: "spring", stiffness: 400, damping: 25 }}>
           <Trash2 size={20} className="text-white" />
         </motion.div>
-      </motion.div>
-
-      {/* Draggable card */}
+      </div>
       <motion.div
-        drag="x"
-        dragConstraints={{ left: -DELETE_THRESHOLD * 1.6, right: 0 }}
-        dragElastic={{ left: 0.15, right: 0 }}
-        style={{ x, opacity: cardOpacity }}
-        onDragEnd={handleDragEnd}
-        dragMomentum={false}
-        className="relative cursor-grab active:cursor-grabbing"
-      >
-        {children}
-      </motion.div>
+        animate={{ x: ox }}
+        transition={active.current ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 42 }}
+        onPointerDown={pd} onPointerMove={pm} onPointerUp={pu} onPointerCancel={pu}
+        className="relative"
+      >{children}</motion.div>
     </div>
   );
 }
 
-// ─── CategoryItem ───────────────────────────────────────────────────────────
-
-function CategoryItem({
-  cat,
-  isDragging,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
-  onEdit,
-  onDelete,
-}: {
-  cat: Category;
-  isDragging: boolean;
-  onPointerDown: (e: React.PointerEvent) => void;
-  onPointerMove: (e: React.PointerEvent) => void;
-  onPointerUp: () => void;
+function CategoryItem({ cat, isDragging, onDragDown, onDragMove, onDragUp, onEdit }: {
+  cat: Category; isDragging: boolean;
+  onDragDown: (e: React.PointerEvent) => void;
+  onDragMove: (e: React.PointerEvent) => void;
+  onDragUp: () => void;
   onEdit: (cat: Category) => void;
-  onDelete: (cat: Category) => void;
 }) {
   return (
     <motion.div
-      layout
-      layoutId={`cat-${cat.id}`}
+      layout layoutId={`cat-${cat.id}`}
       transition={{ type: "spring", stiffness: 500, damping: 40 }}
       animate={{
         scale: isDragging ? 1.03 : 1,
-        boxShadow: isDragging
-          ? "0 12px 32px rgba(0,0,0,0.18)"
-          : "0 1px 3px rgba(0,0,0,0.06)",
+        boxShadow: isDragging ? "0 12px 32px rgba(0,0,0,0.18)" : "0 1px 3px rgba(0,0,0,0.05)",
       }}
       style={{ zIndex: isDragging ? 50 : "auto", position: "relative" }}
       className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none"
     >
-      {/* Drag handle */}
-      <div
-        className="touch-none cursor-grab active:cursor-grabbing p-1 -ml-1 flex-shrink-0"
+      <div className="p-1 -ml-1 flex-shrink-0 cursor-grab active:cursor-grabbing"
         style={{ touchAction: "none" }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      >
+        onPointerDown={onDragDown} onPointerMove={onDragMove}
+        onPointerUp={onDragUp} onPointerCancel={onDragUp}>
         <GripVertical size={16} className="text-muted-foreground/40" />
       </div>
-
-      <div
-        className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-        style={{ backgroundColor: cat.color }}
-      >
-        {cat.name.slice(0, 1).toUpperCase()}
+      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+        style={{ backgroundColor: cat.color }}>
+        {cat.name.slice(0,1).toUpperCase()}
       </div>
-
       <span className="flex-1 text-sm font-medium truncate">{cat.name}</span>
-
       {!cat.isDefault && (
-        <Button
-          variant="ghost" size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground flex-shrink-0"
-          onClick={() => onEdit(cat)}
-        >
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground flex-shrink-0"
+          onClick={() => onEdit(cat)}>
           <Pencil size={13} />
         </Button>
       )}
@@ -205,23 +155,14 @@ function CategoryItem({
   );
 }
 
-// ─── CategorySection ─────────────────────────────────────────────────────
-
-function CategorySection({
-  title, type, categories, onReorder, onEdit, onDelete, onAdd,
-}: {
-  title: string;
-  type: "income" | "expense";
-  categories: Category[];
-  onReorder: (type: "income" | "expense", order: number[]) => void;
-  onEdit: (cat: Category) => void;
-  onDelete: (id: number) => void;
-  onAdd: (type: "income" | "expense") => void;
+function CategorySection({ title, type, categories, onReorder, onEdit, onDelete, onAdd }: {
+  title: string; type: "income"|"expense"; categories: Category[];
+  onReorder: (type: "income"|"expense", order: number[]) => void;
+  onEdit: (cat: Category) => void; onDelete: (id: number) => void;
+  onAdd: (type: "income"|"expense") => void;
 }) {
-  const commit = useCallback((order: number[]) => onReorder(type, order), [type, onReorder]);
-  const { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp } =
-    useDragSort(categories, commit);
-
+  const commit = useCallback((o: number[]) => onReorder(type, o), [type, onReorder]);
+  const { items, draggingId, listRef, onPointerDown, onPointerMove, onPointerUp } = useDragSort(categories, commit);
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -230,36 +171,23 @@ function CategorySection({
           <Plus size={13} /> Добавить
         </Button>
       </div>
-
       {items.length === 0 ? (
-        <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">
-          Нет категорий
-        </div>
+        <div className="text-xs text-muted-foreground text-center py-6 rounded-xl border border-dashed border-border">Нет категорий</div>
       ) : (
         <motion.div ref={listRef} className="flex flex-col gap-2" layout>
           <AnimatePresence initial={false}>
             {items.map(cat => (
-              <motion.div
-                key={cat.id}
-                layout
-                initial={{ opacity: 0, scale: 0.92, y: -8 }}
+              <motion.div key={cat.id} layout
+                initial={{ opacity: 0, scale: 0.94, y: -6 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.88, x: -60, transition: { duration: 0.25, ease: [0.4, 0, 0.2, 1] } }}
+                exit={{ opacity: 0, scale: 0.88, x: -80, transition: { duration: 0.22, ease: [0.4,0,0.2,1] } }}
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               >
-                <SwipeToDelete
-                  canDelete={!cat.isDefault}
-                  onDelete={() => onDelete(cat.id)}
-                >
-                  <CategoryItem
-                    cat={cat}
-                    isDragging={draggingId === cat.id}
-                    onPointerDown={(e) => onPointerDown(e, cat.id)}
-                    onPointerMove={(e) => onPointerMove(e, cat.id)}
-                    onPointerUp={onPointerUp}
-                    onEdit={onEdit}
-                    onDelete={() => onDelete(cat.id)}
-                  />
+                <SwipeToDelete canDelete={!cat.isDefault} onDelete={() => onDelete(cat.id)}>
+                  <CategoryItem cat={cat} isDragging={draggingId === cat.id}
+                    onDragDown={e => onPointerDown(e, cat.id)}
+                    onDragMove={e => onPointerMove(e, cat.id)}
+                    onDragUp={onPointerUp} onEdit={onEdit} />
                 </SwipeToDelete>
               </motion.div>
             ))}
@@ -270,179 +198,101 @@ function CategorySection({
   );
 }
 
-// ─── Root ─────────────────────────────────────────────────────────────────────
-
 export default function CategoryManager() {
   const { toast } = useToast();
   const qc = useQueryClient();
-
   const [addOpen, setAddOpen] = useState(false);
-  const [addType, setAddType] = useState<"income" | "expense">("expense");
+  const [addType, setAddType] = useState<"income"|"expense">("expense");
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(COLOR_OPTIONS[0]);
-
-  const [editCat, setEditCat] = useState<Category | null>(null);
+  const [editCat, setEditCat] = useState<Category|null>(null);
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
 
-  const { data: categories = [], isLoading } = useQuery<Category[]>({
-    queryKey: ["/api/categories"],
+  const { data: categories = [], isLoading } = useQuery<Category[]>({ queryKey: ["/api/categories"] });
+  const inc = [...categories.filter(c => c.type==="income")].sort((a,b) => a.sortOrder-b.sortOrder);
+  const exp = [...categories.filter(c => c.type==="expense")].sort((a,b) => a.sortOrder-b.sortOrder);
+
+  const addM = useMutation({
+    mutationFn: async (d: {name:string;type:string;icon:string;color:string}) => (await apiRequest("POST","/api/categories",d)).json(),
+    onSuccess: () => { toast({title:"Категория создана"}); qc.invalidateQueries({queryKey:["/api/categories"]}); setAddOpen(false); setNewName(""); },
+    onError: () => toast({title:"Ошибка создания",variant:"destructive"}),
+  });
+  const editM = useMutation({
+    mutationFn: async ({id,data}:{id:number;data:Partial<Category>}) => (await apiRequest("PATCH",`/api/categories/${id}`,data)).json(),
+    onSuccess: () => { toast({title:"Категория обновлена"}); qc.invalidateQueries({queryKey:["/api/categories"]}); setEditCat(null); },
+    onError: () => toast({title:"Ошибка",variant:"destructive"}),
+  });
+  const delM = useMutation({
+    mutationFn: async (id:number) => apiRequest("DELETE",`/api/categories/${id}`),
+    onSuccess: () => { toast({title:"Категория удалена"}); qc.invalidateQueries({queryKey:["/api/categories"]}); },
+    onError: () => toast({title:"Ошибка удаления",variant:"destructive"}),
+  });
+  const reorderM = useMutation({
+    mutationFn: async ({type,order}:{type:"income"|"expense";order:number[]}) => apiRequest("PATCH","/api/categories/reorder",{type,order}),
+    onSuccess: () => qc.invalidateQueries({queryKey:["/api/categories"]}),
   });
 
-  const incomeCategories = [...categories.filter(c => c.type === "income")]
-    .sort((a, b) => a.sortOrder - b.sortOrder);
-  const expenseCategories = [...categories.filter(c => c.type === "expense")]
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+  if (isLoading) return <div className="text-sm text-muted-foreground py-6 text-center">Загрузка…</div>;
 
-  const addMutation = useMutation({
-    mutationFn: async (data: { name: string; type: string; icon: string; color: string }) => {
-      const res = await apiRequest("POST", "/api/categories", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Категория создана" });
-      qc.invalidateQueries({ queryKey: ["/api/categories"] });
-      setAddOpen(false);
-      setNewName("");
-    },
-    onError: () => toast({ title: "Ошибка создания", variant: "destructive" }),
-  });
-
-  const editMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<Category> }) => {
-      const res = await apiRequest("PATCH", `/api/categories/${id}`, data);
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Категория обновлена" });
-      qc.invalidateQueries({ queryKey: ["/api/categories"] });
-      setEditCat(null);
-    },
-    onError: () => toast({ title: "Ошибка обновления", variant: "destructive" }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/categories/${id}`);
-    },
-    onSuccess: () => {
-      toast({ title: "Категория удалена" });
-      qc.invalidateQueries({ queryKey: ["/api/categories"] });
-    },
-    onError: () => toast({ title: "Ошибка удаления", variant: "destructive" }),
-  });
-
-  const reorderMutation = useMutation({
-    mutationFn: async ({ type, order }: { type: "income" | "expense"; order: number[] }) => {
-      await apiRequest("PATCH", "/api/categories/reorder", { type, order });
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/categories"] }),
-  });
-
-  if (isLoading) {
-    return <div className="text-sm text-muted-foreground py-6 text-center">Загрузка…</div>;
-  }
+  const colorPicker = (selected: string, onSelect: (c:string)=>void) => (
+    <div className="flex flex-wrap gap-2">
+      {COLOR_OPTIONS.map(c => (
+        <button key={c} type="button" onClick={() => onSelect(c)}
+          className={`w-7 h-7 rounded-full border-2 transition-transform ${selected===c?"border-foreground scale-110":"border-transparent"}`}
+          style={{backgroundColor:c}} />
+      ))}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      <CategorySection
-        title="Доходы"
-        type="income"
-        categories={incomeCategories}
-        onReorder={(type, order) => reorderMutation.mutate({ type, order })}
-        onEdit={(cat) => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
-        onDelete={(id) => deleteMutation.mutate(id)}
-        onAdd={(t) => { setAddType(t); setAddOpen(true); }}
-      />
-      <CategorySection
-        title="Расходы"
-        type="expense"
-        categories={expenseCategories}
-        onReorder={(type, order) => reorderMutation.mutate({ type, order })}
-        onEdit={(cat) => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
-        onDelete={(id) => deleteMutation.mutate(id)}
-        onAdd={(t) => { setAddType(t); setAddOpen(true); }}
-      />
+      <CategorySection title="Доходы" type="income" categories={inc}
+        onReorder={(t,o) => reorderM.mutate({type:t,order:o})}
+        onEdit={cat => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
+        onDelete={id => delM.mutate(id)}
+        onAdd={t => { setAddType(t); setAddOpen(true); }} />
+      <CategorySection title="Расходы" type="expense" categories={exp}
+        onReorder={(t,o) => reorderM.mutate({type:t,order:o})}
+        onEdit={cat => { setEditCat(cat); setEditName(cat.name); setEditColor(cat.color); }}
+        onDelete={id => delM.mutate(id)}
+        onAdd={t => { setAddType(t); setAddOpen(true); }} />
 
-      {/* DIALOG: ADD */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Новая категория</DialogTitle>
-            <DialogDescription>
-              {addType === "income" ? "Категория доходов" : "Категория расходов"}
-            </DialogDescription>
+            <DialogDescription>{addType==="income"?"Категория доходов":"Категория расходов"}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Название</label>
-              <Input
-                placeholder="Например: Кафе, Аренда…"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && addMutation.mutate({ name: newName.trim(), type: addType, icon: "Tag", color: newColor })}
-                autoFocus
-              />
+              <Input placeholder="Например: Кафе, Аренда…" value={newName}
+                onChange={e=>setNewName(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&addM.mutate({name:newName.trim(),type:addType,icon:"Tag",color:newColor})}
+                autoFocus />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Цвет</label>
-              <div className="flex flex-wrap gap-2">
-                {COLOR_OPTIONS.map(c => (
-                  <button key={c} type="button" onClick={() => setNewColor(c)}
-                    className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                      newColor === c ? "border-foreground scale-110" : "border-transparent"
-                    }`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-            </div>
-            <Button
-              className="w-full"
-              onClick={() => addMutation.mutate({ name: newName.trim(), type: addType, icon: "Tag", color: newColor })}
-              disabled={!newName.trim() || addMutation.isPending}
-            >
-              {addMutation.isPending ? "Создаётся…" : "Создать"}
+            <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(newColor,setNewColor)}</div>
+            <Button className="w-full" onClick={()=>addM.mutate({name:newName.trim(),type:addType,icon:"Tag",color:newColor})} disabled={!newName.trim()||addM.isPending}>
+              {addM.isPending?"Создаётся…":"Создать"}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* DIALOG: EDIT */}
-      <Dialog open={!!editCat} onOpenChange={(o) => { if (!o) setEditCat(null); }}>
+      <Dialog open={!!editCat} onOpenChange={o=>{ if(!o) setEditCat(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Редактировать категорию</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Редактировать категорию</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Название</label>
-              <Input
-                value={editName}
-                onChange={e => setEditName(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && editMutation.mutate({ id: editCat!.id, data: { name: editName, color: editColor } })}
-                autoFocus
-              />
+              <Input value={editName} onChange={e=>setEditName(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&editM.mutate({id:editCat!.id,data:{name:editName,color:editColor}})}
+                autoFocus />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Цвет</label>
-              <div className="flex flex-wrap gap-2">
-                {COLOR_OPTIONS.map(c => (
-                  <button key={c} type="button" onClick={() => setEditColor(c)}
-                    className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                      editColor === c ? "border-foreground scale-110" : "border-transparent"
-                    }`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-            </div>
-            <Button
-              className="w-full"
-              onClick={() => editMutation.mutate({ id: editCat!.id, data: { name: editName, color: editColor } })}
-              disabled={!editName.trim() || editMutation.isPending}
-            >
-              {editMutation.isPending ? "Сохраняется…" : "Сохранить"}
+            <div className="space-y-1.5"><label className="text-sm font-medium">Цвет</label>{colorPicker(editColor,setEditColor)}</div>
+            <Button className="w-full" onClick={()=>editM.mutate({id:editCat!.id,data:{name:editName,color:editColor}})} disabled={!editName.trim()||editM.isPending}>
+              {editM.isPending?"Сохраняется…":"Сохранить"}
             </Button>
           </div>
         </DialogContent>
