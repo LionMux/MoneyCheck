@@ -204,23 +204,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto bg-background pb-16 md:pb-0">
+        {/* Page content — pb учитывает нижний nav + safe area iPhone */}
+        <main className="flex-1 overflow-y-auto bg-background pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
           <div className="p-4 md:p-6 max-w-5xl mx-auto">
             {children}
           </div>
         </main>
       </div>
 
-      {/* MOBILE BOTTOM NAV */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm">
+      {/* MOBILE BOTTOM NAV — safe-area padding снизу */}
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
         <div className="flex justify-around py-1 px-1">
           {mobileNavItems.map((item) => (
             <Link key={item.href} href={item.href}>
               <a
                 data-testid={item.testId}
                 className={cn(
-                  "flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-colors min-w-[52px]",
+                  "flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-colors min-w-[52px]",
                   isActive(item.href) ? "text-primary" : "text-muted-foreground"
                 )}
               >

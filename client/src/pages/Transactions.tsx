@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Transaction, InsertTransaction, Account } from "@shared/schema";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,9 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 
-const CATEGORIES = ["Еда", "Транспорт", "Развлечения", "Подписки", "Спорт", "ЖКХ", "Образование", "Доход", "Другое"];
+interface Category {
+  id: number; name: string; type: string;
+}
 
 const ACCOUNT_TYPE_ICONS: Record<string, React.ReactNode> = {
   debit: <CreditCard size={14} />,
@@ -33,7 +35,6 @@ function formatDate(d: string) {
   catch { return d; }
 }
 
-/** Для кредитной карты expense → creditPurchase, income → creditPayment */
 function resolveType(formType: "income" | "expense", account?: Account): string {
   if (!account || account.type !== "credit") return formType;
   return formType === "expense" ? "creditPurchase" : "creditPayment";
@@ -50,10 +51,16 @@ export default function Transactions() {
 
   const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
   const { data: accounts = [] } = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
+  // Берём категории из API — те же, что в Настройках
+  const { data: allCategories = [] } = useQuery<Category[]>({ queryKey: ["/api/categories"] });
 
   const activeAccounts = accounts.filter((a) => !a.isArchived);
   const selectedAccount = activeAccounts.find((a) => a.id === form.accountId);
   const isCreditSelected = selectedAccount?.type === "credit";
+
+  // Фильтруем категории по выбранному типу операции
+  const formType = (form.type === "expense" || form.type === "creditPurchase") ? "expense" : "income";
+  const filteredCategories = allCategories.filter(c => c.type === formType);
 
   const addMut = useMutation({
     mutationFn: (data: InsertTransaction) => apiRequest("POST", "/api/transactions", data),
@@ -86,24 +93,25 @@ export default function Transactions() {
       return;
     }
     const resolvedType = resolveType(form.type as "income" | "expense", selectedAccount);
-    // creditPurchase — отрицательная (баланс уменьшается, долг растёт)    // для creditPayment — отрицательная (долг уменьшается)
     let amount: number;
     if (resolvedType === "creditPurchase") {
-      amount = -Math.abs(Number(form.amount));    } else if (resolvedType === "creditPayment") {
-      amount = Math.abs(Number(form.amount));    } else if (form.type === "expense") {
+      amount = -Math.abs(Number(form.amount));
+    } else if (resolvedType === "creditPayment") {
+      amount = Math.abs(Number(form.amount));
+    } else if (form.type === "expense") {
       amount = -Math.abs(Number(form.amount));
     } else {
       amount = Math.abs(Number(form.amount));
     }
 
-    const payload: any = {
-      ...form,
-      amount,
-      type: resolvedType,
-    };
+    const payload: any = { ...form, amount, type: resolvedType };
     if (!form.accountId) delete payload.accountId;
-
     addMut.mutate(payload as InsertTransaction);
+  };
+
+  // При смене типа операции — сбрасываем категорию
+  const handleTypeChange = (t: "income" | "expense") => {
+    setForm(f => ({ ...f, type: t, category: undefined }));
   };
 
   return (
@@ -227,12 +235,12 @@ export default function Transactions() {
             <DialogTitle>Новая операция</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            {/* Тип операции */}
+            {/* Тип */}
             <div className="grid grid-cols-2 gap-2">
               {(["expense", "income"] as const).map(t => (
                 <button
                   key={t}
-                  onClick={() => setForm(f => ({ ...f, type: t }))}
+                  onClick={() => handleTypeChange(t)}
                   data-testid={`type-${t}`}
                   className={cn(
                     "py-2 rounded-lg text-sm font-medium border transition-all",
@@ -264,10 +272,7 @@ export default function Transactions() {
                     {activeAccounts.map(acc => (
                       <SelectItem key={acc.id} value={String(acc.id)}>
                         <div className="flex items-center gap-2">
-                          <span
-                            className="w-3 h-3 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: acc.color ?? "#10b981" }}
-                          />
+                          <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: acc.color ?? "#10b981" }} />
                           <span>{acc.name}</span>
                           <span className="text-xs text-muted-foreground ml-1">
                             {acc.type === "credit" ? "(кредит)" : acc.type === "cash" ? "(наличные)" : ""}
@@ -277,14 +282,10 @@ export default function Transactions() {
                     ))}
                   </SelectContent>
                 </Select>
-
-                {/* Подсказка для кредитной карты */}
                 {isCreditSelected && (
                   <p className="text-xs text-orange-500 mt-1.5 flex items-center gap-1">
                     <CreditCard size={11} />
-                    {form.type === "expense"
-                      ? "Покупка в кредит — долг возрастёт"
-                      : "Погашение кредита — долг уменьшится"}
+                    {form.type === "expense" ? "Покупка в кредит — долг возрастёт" : "Погашение кредита — долг уменьшится"}
                   </p>
                 )}
               </div>
@@ -294,8 +295,7 @@ export default function Transactions() {
             <div>
               <Label htmlFor="tx-title">Название</Label>
               <Input
-                id="tx-title"
-                data-testid="input-tx-title"
+                id="tx-title" data-testid="input-tx-title"
                 placeholder="Например, продукты"
                 value={form.title ?? ""}
                 onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
@@ -307,17 +307,15 @@ export default function Transactions() {
             <div>
               <Label htmlFor="tx-amount">Сумма (₽)</Label>
               <Input
-                id="tx-amount"
-                data-testid="input-tx-amount"
-                type="number"
-                placeholder="0"
+                id="tx-amount" data-testid="input-tx-amount"
+                type="number" placeholder="0"
                 value={form.amount ?? ""}
                 onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
                 className="mt-1"
               />
             </div>
 
-            {/* Категория */}
+            {/* Категория — из API, отфильтровано по типу */}
             <div>
               <Label>Категория</Label>
               <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
@@ -325,7 +323,11 @@ export default function Transactions() {
                   <SelectValue placeholder="Выберите категорию" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {filteredCategories.length === 0 ? (
+                    <SelectItem value="__none" disabled>Нет категорий — добавьте в Настройках</SelectItem>
+                  ) : (
+                    filteredCategories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -334,8 +336,7 @@ export default function Transactions() {
             <div>
               <Label htmlFor="tx-date">Дата</Label>
               <Input
-                id="tx-date"
-                data-testid="input-tx-date"
+                id="tx-date" data-testid="input-tx-date"
                 type="date"
                 value={form.date ?? ""}
                 onChange={e => setForm(f => ({ ...f, date: e.target.value }))}

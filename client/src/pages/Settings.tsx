@@ -112,7 +112,7 @@ export default function SettingsPage() {
             <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
             <span>
               Зажмите значок ☰ и перетащите категорию, чтобы изменить порядок.{" "}
-              Стандартные категории нельзя удалить, но можно переименовать.
+              На мобиле — смахните влево, чтобы удалить. Удалить можно любую категорию.
             </span>
           </div>
           <CategoryManager />
