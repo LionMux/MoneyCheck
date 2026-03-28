@@ -28,7 +28,6 @@ const COLOR_OPTIONS = [
   "#3BB273","#F18F01",
 ];
 
-// ─ Контекст для синхронизации открытого свайпа ──────────────────────────────
 const SwipeContext = createContext<{
   openId: number | null;
   setOpenId: (id: number | null) => void;
@@ -37,7 +36,6 @@ const SwipeContext = createContext<{
 const DELETE_BTN_W = 80;
 const OPEN_THRESHOLD = DELETE_BTN_W * 0.5;
 
-// ─ SwipeToDelete — работает ТОЛЬКО на touch (pointerType !== 'mouse') ────────
 function SwipeToDelete({ id, onDelete, children }: {
   id: number; onDelete: () => void; children: React.ReactNode;
 }) {
@@ -56,7 +54,6 @@ function SwipeToDelete({ id, onDelete, children }: {
   const totalOx = baseOffset + liveOx;
 
   const onPD = (e: React.PointerEvent) => {
-    // ── только тач, мышь игнорируем ──────────────────────────────────────
     if (e.pointerType === 'mouse') return;
     if ((e.target as HTMLElement).closest('[data-grip]')) return;
     if ((e.target as HTMLElement).closest('[data-delete-btn]')) return;
@@ -92,7 +89,6 @@ function SwipeToDelete({ id, onDelete, children }: {
 
   return (
     <div className="relative rounded-xl overflow-hidden" style={{ touchAction: 'pan-y' }}>
-      {/* Красная кнопка — только на мобайле (md:hidden) */}
       <div
         className="absolute top-0 right-0 h-full flex items-center justify-center bg-destructive rounded-r-xl md:hidden"
         style={{ width: DELETE_BTN_W }}
@@ -106,8 +102,6 @@ function SwipeToDelete({ id, onDelete, children }: {
           <span className="text-xs font-medium">Удалить</span>
         </button>
       </div>
-
-      {/* Контент */}
       <div
         style={{
           transform: `translateX(${totalOx}px)`,
@@ -125,7 +119,6 @@ function SwipeToDelete({ id, onDelete, children }: {
   );
 }
 
-// ─ CategoryCard ────────────────────────────────────────────────────────────
 function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps }: {
   cat: Category;
   onEdit?: (cat: Category) => void;
@@ -136,7 +129,6 @@ function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps 
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border border-border bg-card select-none
       ${overlay ? 'shadow-2xl ring-2 ring-primary/20 opacity-95 rotate-1 scale-105' : 'shadow-sm'}`}>
-
       <div
         data-grip
         {...dragHandleProps}
@@ -145,16 +137,13 @@ function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps 
       >
         <GripVertical size={18} />
       </div>
-
       <div
         className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
         style={{ backgroundColor: cat.color }}
       >
         {cat.name.slice(0, 1).toUpperCase()}
       </div>
-
       <span className="flex-1 text-sm font-medium truncate">{cat.name}</span>
-
       <div className="flex items-center gap-1 flex-shrink-0">
         {onEdit && (
           <Button
@@ -166,7 +155,6 @@ function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps 
             <Pencil size={13} />
           </Button>
         )}
-        {/* Корзинка — только на десктопе (md+) */}
         {onDelete && (
           <Button
             variant="ghost" size="icon"
@@ -182,7 +170,6 @@ function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps 
   );
 }
 
-// ─ SortableRow ────────────────────────────────────────────────────────────
 function SortableRow({ cat, onEdit, onDelete }: {
   cat: Category;
   onEdit: (cat: Category) => void;
@@ -214,7 +201,6 @@ function SortableRow({ cat, onEdit, onDelete }: {
   );
 }
 
-// ─ CategorySection ────────────────────────────────────────────────────────
 function CategorySection({ title, type, categories, onReorder, onEdit, onDelete, onAdd }: {
   title: string;
   type: 'income' | 'expense';
@@ -229,7 +215,9 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
   const [openSwipeId, setOpenSwipeId] = useState<number | null>(null);
 
   const prevKey = useRef('');
-  const curKey = categories.map(c => `${c.id}:${c.sortOrder}`).join(',');
+  // Ключ включает id, sortOrder, name и color —
+  // любое изменение триггерит обновление списка
+  const curKey = categories.map(c => `${c.id}:${c.sortOrder}:${c.name}:${c.color}`).join(',');
   if (curKey !== prevKey.current) { prevKey.current = curKey; setItems(categories); }
 
   const activeCat = activeId != null ? items.find(c => c.id === activeId) : null;
@@ -287,7 +275,6 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
   );
 }
 
-// ─ Root ───────────────────────────────────────────────────────────────────
 export default function CategoryManager() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -306,20 +293,39 @@ export default function CategoryManager() {
   const addM = useMutation({
     mutationFn: async (d: { name: string; type: string; icon: string; color: string }) =>
       (await apiRequest('POST', '/api/categories', d)).json(),
-    onSuccess: () => { toast({ title: 'Категория создана' }); qc.invalidateQueries({ queryKey: ['/api/categories'] }); setAddOpen(false); setNewName(''); },
+    onSuccess: () => {
+      toast({ title: 'Категория создана' });
+      qc.invalidateQueries({ queryKey: ['/api/categories'] });
+      setAddOpen(false);
+      setNewName('');
+    },
     onError: () => toast({ title: 'Ошибка создания', variant: 'destructive' }),
   });
+
   const editM = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<Category> }) =>
       (await apiRequest('PATCH', `/api/categories/${id}`, data)).json(),
-    onSuccess: () => { toast({ title: 'Категория обновлена' }); qc.invalidateQueries({ queryKey: ['/api/categories'] }); setEditCat(null); },
+    onSuccess: (updated: Category) => {
+      toast({ title: 'Категория обновлена' });
+      // Оптимистично обновляем кеш сразу, без ждания сети
+      qc.setQueryData<Category[]>(['/api/categories'], (old = []) =>
+        old.map(c => c.id === updated.id ? updated : c)
+      );
+      qc.invalidateQueries({ queryKey: ['/api/categories'] });
+      setEditCat(null);
+    },
     onError: () => toast({ title: 'Ошибка', variant: 'destructive' }),
   });
+
   const delM = useMutation({
     mutationFn: async (id: number) => apiRequest('DELETE', `/api/categories/${id}`),
-    onSuccess: () => { toast({ title: 'Категория удалена' }); qc.invalidateQueries({ queryKey: ['/api/categories'] }); },
+    onSuccess: () => {
+      toast({ title: 'Категория удалена' });
+      qc.invalidateQueries({ queryKey: ['/api/categories'] });
+    },
     onError: () => toast({ title: 'Ошибка удаления', variant: 'destructive' }),
   });
+
   const reorderM = useMutation({
     mutationFn: async ({ type, order }: { type: 'income' | 'expense'; order: number[] }) =>
       apiRequest('PATCH', '/api/categories/reorder', { type, order }),
