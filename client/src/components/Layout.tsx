@@ -176,8 +176,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* MAIN */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Mobile header */}
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-background border-b border-border flex-shrink-0">
+        {/* Mobile header — pt учитывает статус-бар iPhone (safe-area-inset-top) */}
+        <header
+          className="md:hidden flex items-center gap-3 px-4 pb-3 bg-background border-b border-border flex-shrink-0"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
+        >
           <button
             onClick={() => setDrawerOpen(true)}
             className="p-1.5 rounded-lg hover:bg-accent transition-colors"
@@ -204,7 +207,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
         </header>
 
-        {/* Page content — pb учитывает нижний nav + safe area iPhone */}
+        {/* Page content */}
         <main className="flex-1 overflow-y-auto bg-background pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
           <div className="p-4 md:p-6 max-w-5xl mx-auto">
             {children}
@@ -212,7 +215,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      {/* MOBILE BOTTOM NAV — safe-area padding снизу */}
+      {/* MOBILE BOTTOM NAV */}
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
