@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction, Budget, SavingsGoal, UserProgress, Account } from "@shared/schema";
-import { TrendingUp, TrendingDown, Wallet, BookOpen, ArrowRight, CalendarDays } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, BookOpen, ArrowRight, CalendarDays, ArrowLeftRight } from "lucide-react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -81,8 +81,13 @@ export default function Dashboard() {
     .reduce((s, a) => s + parseFloat(String((a as any).balance ?? a.initialBalance)), 0);
 
   const monthTxs = transactions.filter(t => t.date.startsWith(currentDisplayMonth));
-  const income   = monthTxs.filter(t => t.type === "income" || t.type === "creditPayment").reduce((s, t) => s + t.amount, 0);
-  const expense  = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  // creditPayment = перевод, не доход и не расход
+  const income  = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  const incomeCount  = monthTxs.filter(t => t.type === "income").length;
+  const expenseCount = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").length;
 
   const monthLabel    = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
   const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
@@ -150,7 +155,7 @@ export default function Dashboard() {
               </div>
               <p className="text-xl font-bold tabular-nums text-income">{fmt(income)}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {monthLabelCap} · {monthTxs.filter(t => t.type === "income" || t.type === "creditPayment").length} операций
+                {monthLabelCap} · {incomeCount} операций
               </p>
             </CardContent>
           </Card>
@@ -163,7 +168,7 @@ export default function Dashboard() {
               </div>
               <p className="text-xl font-bold tabular-nums text-expense">{fmt(expense)}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {monthLabelCap} · {monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").length} операций
+                {monthLabelCap} · {expenseCount} операций
               </p>
             </CardContent>
           </Card>
@@ -183,14 +188,12 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Новый график активности */}
           <Card>
             <CardContent className="pt-4">
               <ActivityChart transactions={transactions} />
             </CardContent>
           </Card>
 
-          {/* Pie chart */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Расходы по категориям</CardTitle>
@@ -198,12 +201,7 @@ export default function Dashboard() {
             <CardContent className="flex flex-col items-center gap-3 pt-1">
               <ResponsiveContainer width="100%" height={160}>
                 <PieChart>
-                  <Pie
-                    data={catData}
-                    cx="50%" cy="50%"
-                    innerRadius={48} outerRadius={72}
-                    paddingAngle={3} dataKey="value"
-                  >
+                  <Pie data={catData} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="value">
                     {catData.map((entry, i) => (
                       <Cell key={i} fill={CATEGORY_COLORS[entry.name] ?? "#848456"} />
                     ))}
@@ -219,10 +217,7 @@ export default function Dashboard() {
               <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 w-full">
                 {catData.map((entry) => (
                   <span key={entry.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ background: CATEGORY_COLORS[entry.name] ?? "#848456" }}
-                    />
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CATEGORY_COLORS[entry.name] ?? "#848456" }} />
                     {entry.name}
                   </span>
                 ))}
@@ -237,25 +232,36 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold">Последние операции</CardTitle>
                 <Link href="/transactions">
-                  <a className="text-xs text-primary flex items-center gap-1 hover:underline">
-                    Все <ArrowRight size={12} />
-                  </a>
+                  <a className="text-xs text-primary flex items-center gap-1 hover:underline">Все <ArrowRight size={12} /></a>
                 </Link>
               </div>
             </CardHeader>
             <CardContent className="space-y-2 pt-0">
-              {recentTxs.map(tx => (
-                <div key={tx.id} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
-                  <div>
-                    <p className="text-sm font-medium leading-none">{tx.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{tx.category}</p>
+              {recentTxs.map(tx => {
+                const isIncome   = tx.type === "income";
+                const isTransfer = tx.type === "creditPayment";
+                const color = isIncome ? "text-income" : isTransfer ? "text-blue-500" : "text-expense";
+                const icon  = isIncome
+                  ? <TrendingUp size={13} className="text-income" />
+                  : isTransfer
+                  ? <ArrowLeftRight size={13} className="text-blue-500" />
+                  : <TrendingDown size={13} className="text-expense" />;
+                const prefix = isIncome ? "+" : "−";
+                return (
+                  <div key={tx.id} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0 gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {icon}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate leading-none">{tx.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{tx.category}</p>
+                      </div>
+                    </div>
+                    <span className={cn("text-sm font-semibold tabular-nums flex-shrink-0", color)}>
+                      {prefix}{fmt(Math.abs(tx.amount))}
+                    </span>
                   </div>
-                  <span className={cn("text-sm font-semibold tabular-nums",
-                    (tx.type === "income" || tx.type === "creditPayment") ? "text-income" : "text-expense")}>
-                    {(tx.type === "income" || tx.type === "creditPayment") ? "+" : ""}{fmt(Math.abs(tx.amount))}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
 
@@ -264,9 +270,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold">Цели накоплений</CardTitle>
                 <Link href="/goals">
-                  <a className="text-xs text-primary flex items-center gap-1 hover:underline">
-                    Все <ArrowRight size={12} />
-                  </a>
+                  <a className="text-xs text-primary flex items-center gap-1 hover:underline">Все <ArrowRight size={12} /></a>
                 </Link>
               </div>
             </CardHeader>
