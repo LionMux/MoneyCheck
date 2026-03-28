@@ -20,17 +20,11 @@ export async function apiRequest(
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
-  return res; // let the caller decide what to do with non-ok responses
+  return res;
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw" | "logout";
 
-/**
- * Default query function.
- * on401="logout" — when the server returns 401, call the global
- * unauthorizedHandler (set by AuthProvider) to force logout immediately.
- * This prevents a stale/expired token from rendering another user's data.
- */
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
@@ -43,21 +37,16 @@ export const getQueryFn: <T>(options: {
     if (res.status === 401) {
       if (unauthorizedBehavior === "returnNull") return null;
       if (unauthorizedBehavior === "logout") {
-        // Notify AuthContext to log the user out
         unauthorizedHandler?.();
         return null;
       }
-      await throwIfResNotOk(res); // "throw"
+      await throwIfResNotOk(res);
     }
 
     await throwIfResNotOk(res);
     return await res.json();
   };
 
-/**
- * Global unauthorized handler — set by AuthProvider on mount.
- * Allows queryClient to trigger logout without a direct import cycle.
- */
 let unauthorizedHandler: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: () => void) {
   unauthorizedHandler = fn;
@@ -67,9 +56,12 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "logout" }),
-      refetchInterval: false,
-      refetchOnWindowFocus: false,
-      staleTime: Infinity,
+      // Данные считаются устаревшими через 30 секунд
+      staleTime: 30_000,
+      // При возврате на вкладку — автообновление
+      refetchOnWindowFocus: true,
+      // При восстановлении сети — автообновление
+      refetchOnReconnect: true,
       retry: false,
     },
     mutations: {

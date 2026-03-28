@@ -1,71 +1,100 @@
 /**
  * FinWise Service Worker
- * Provides offline support and push notifications.
+ * Strategy:
+ *   - HTML (навигация): network-first — чтобы бандл всегда был актуальным
+ *   - Статика (файлы с хешами в URL): cache-first
+ *   - API: всегда нетворк, не кешируется
+ *   - Обновление: при активации нового SW шлёт сообщение всем вкладкам — они авто-релоадятся
  */
 
-const CACHE_NAME = "finwise-v1";
-const STATIC_ASSETS = [
-  "/",
-  "/index.html",
-  "/manifest.json",
-];
+// Меняйте версию при каждом деплое (Vite подставывает хеш автоматически)
+const CACHE_VERSION = "finwise-v3";
+const STATIC_ASSETS = ["/manifest.json"];
 
-// ── Install: cache static assets ──────────────────────────────────────────
+// ── Install ────────────────────────────────────────────────────────────────
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn("[SW] Cache failed for some assets:", err);
-      });
-    })
-  );
-  self.skipWaiting();
-});
-
-// ── Activate: clean old caches ─────────────────────────────────────────────
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+    caches.open(CACHE_VERSION).then((cache) =>
+      cache.addAll(STATIC_ASSETS).catch((err) =>
+        console.warn("[SW] Cache partial fail:", err)
       )
     )
   );
-  self.clients.claim();
+  // Сразу становимся активным, не ждём закрытия вкладок
+  self.skipWaiting();
 });
 
-// ── Fetch: network-first for API, cache-first for statics ─────────────────
+// ── Activate: чистим старые кеши + шлём обновление ─────────────────────────
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k))
+        )
+      )
+      .then(() => self.clients.claim())
+      .then(() => {
+        // Сообщаем всем открытым вкладкам: "перезагрузитесь"
+        return self.clients
+          .matchAll({ type: "window", includeUncontrolled: true })
+          .then((clients) => {
+            clients.forEach((client) => client.postMessage({ type: "SW_UPDATED" }));
+          });
+      })
+  );
+});
+
+// ── Fetch ──────────────────────────────────────────────────────────────────
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET and API calls (always hit network for fresh data)
-  if (request.method !== "GET" || url.pathname.startsWith("/api/")) {
+  // API — всегда network, нет кеша
+  if (request.method !== "GET" || url.pathname.startsWith("/api/")) return;
+
+  // WebSocket — пропускаем
+  if (url.pathname.includes("socket")) return;
+
+  // Навигация (HTML) — NETWORK-FIRST
+  // При перезапуске сервера всегда получаем свежий index.html
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(request, clone));
+          return response;
+        })
+        .catch(() => caches.match("/index.html"))
+    );
     return;
   }
 
-  // Cache-first for static assets
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        // Cache successful static responses
-        if (response.ok && !url.pathname.includes("socket")) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
-        return response;
-      });
-    }).catch(() => {
-      // Offline fallback for navigation requests
-      if (request.mode === "navigate") {
-        return caches.match("/index.html");
-      }
-    })
-  );
+  // Статические файлы с хешами в URL (бандл) — CACHE-FIRST
+  const hasHash = url.pathname.match(/\.[0-9a-f]{8,}\./); // Vite хеши
+  if (hasHash) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        });
+      })
+    );
+    return;
+  }
+
+  // Всё остальное — network
+  event.respondWith(fetch(request).catch(() => caches.match(request)));
 });
 
-// ── Push Notifications ─────────────────────────────────────────────────────
+// ── Push ───────────────────────────────────────────────────────────────────
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
   const title = data.title ?? "FinWise";
@@ -89,14 +118,16 @@ self.addEventListener("notificationclick", (event) => {
   if (event.action === "dismiss") return;
   const targetUrl = event.notification.data?.url ?? "/";
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ("focus" in client) {
-          client.navigate(targetUrl);
-          return client.focus();
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if ("focus" in client) {
+            client.navigate(targetUrl);
+            return client.focus();
+          }
         }
-      }
-      return clients.openWindow(targetUrl);
-    })
+        return clients.openWindow(targetUrl);
+      })
   );
 });
