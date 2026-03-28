@@ -249,7 +249,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     for (const t of txs) {
       const month = String(t.date).slice(0, 7);
       if (!map[month]) map[month] = { income: 0, expense: 0 };
-      if (t.type === "income" || t.type === "creditPayment") map[month].income += Number(t.amount);
+      // creditPayment — перевод, не учитывается ни в доходах, ни в расходах
+      if (t.type === "income") map[month].income += Number(t.amount);
       else if (t.type === "expense" || t.type === "creditPurchase") map[month].expense += Math.abs(Number(t.amount));
     }
     const result = Object.entries(map)
@@ -521,7 +522,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       let monthIncome = 0;
       let monthExpense = 0;
       for (const t of monthTxs) {
-        if (t.type === "income" || t.type === "creditPayment") monthIncome += Number(t.amount);
+        // creditPayment — перевод, не учитывается ни в доходах, ни в расходах
+        if (t.type === "income") monthIncome += Number(t.amount);
         else if (t.type === "expense" || t.type === "creditPurchase") monthExpense += Math.abs(Number(t.amount));
       }
       const progress = await pg.getUserProgress(userId);

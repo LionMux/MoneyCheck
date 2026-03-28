@@ -61,15 +61,13 @@ export default function ActivityChart({ transactions }: { transactions: Transact
   const [view, setView]   = useState<ViewMode>("pulse");
   const [range, setRange] = useState<Range>("7d");
 
-  // ── Дневные данные ──────────────────────────────────────────────────────────
-const rawData = useMemo(() => {
+  const rawData = useMemo(() => {
     const today = new Date();
     let days: Date[];
-    if (range === "7d")      days = Array.from({ length: 7 },  (_, i) => subDays(today, 6 - i));
+    if (range === "7d")       days = Array.from({ length: 7 },  (_, i) => subDays(today, 6 - i));
     else if (range === "14d") days = Array.from({ length: 14 }, (_, i) => subDays(today, 13 - i));
-    else {
-      days = eachDayOfInterval({ start: startOfMonth(today), end: endOfMonth(today) });
-    }
+    else days = eachDayOfInterval({ start: startOfMonth(today), end: endOfMonth(today) });
+
     return days.map(d => {
       const ds     = format(d, "yyyy-MM-dd");
       const dayTxs = transactions.filter(t => t.date === ds);
@@ -79,14 +77,14 @@ const rawData = useMemo(() => {
       return {
         label,
         fullDate: format(d, "d MMM", { locale: ru }),
-        income:  dayTxs.filter(t => t.type === "income"  || t.type === "creditPayment").reduce((s, t) => s + t.amount, 0),
+        // creditPayment — перевод, не доход и не расход
+        income:  dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
         expense: dayTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0),
       };
     });
   }, [transactions, range]);
 
-  // ── Pulse: нарастающий итог (cumulative) ──────────────────────────────────────
-const pulseData = useMemo(() => {
+  const pulseData = useMemo(() => {
     let cumInc = 0, cumExp = 0;
     return rawData.map(d => {
       cumInc += d.income;
@@ -95,20 +93,15 @@ const pulseData = useMemo(() => {
     });
   }, [rawData]);
 
-  // ── Статистика ───────────────────────────────────────────────────────────────────
-const totalIncome  = rawData.reduce((s, d) => s + d.income, 0);
+  const totalIncome  = rawData.reduce((s, d) => s + d.income, 0);
   const totalExpense = rawData.reduce((s, d) => s + d.expense, 0);
 
   const tickEvery = range === "month" ? 4 : 1;
   const xTicks = rawData.filter((_, i) => i % tickEvery === 0).map(d => d.label);
-
   const barMax = range === "month" ? 8 : 22;
 
-  // ── Рендер ──────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-3">
-
-      {/* Заголовок + переключатели */}
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold leading-none">Activity</p>
@@ -128,10 +121,8 @@ const totalIncome  = rawData.reduce((s, d) => s + d.income, 0);
         </div>
       </div>
 
-      {/* График */}
       <ResponsiveContainer width="100%" height={180}>
         {view === "pulse" ? (
-          // PULSE — нарастающий итог: видно когда расходы перегнали доходы
           <AreaChart data={pulseData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="acInc" x1="0" y1="0" x2="0" y2="1">
@@ -156,19 +147,16 @@ const totalIncome  = rawData.reduce((s, d) => s + d.income, 0);
               labelFormatter={(_, items) => items?.[0]?.payload?.fullDate ?? ""}
               formatter={(v: number, name: string) => [fmt(v), name]}
             />
-            {/* Доход */}
             <Area type="monotone" dataKey="cumInc" name="Доход (итог)"
               stroke="#10b981" strokeWidth={2} fill="url(#acInc)" dot={false}
               activeDot={{ r: 4, fill: "#10b981", stroke: "white", strokeWidth: 2 }}
             />
-            {/* Расход поверх дохода — видно превышение */}
             <Area type="monotone" dataKey="cumExp" name="Расход (итог)"
               stroke="#f43f5e" strokeWidth={2} fill="url(#acExp)" dot={false}
               activeDot={{ r: 4, fill: "#f43f5e", stroke: "white", strokeWidth: 2 }}
             />
           </AreaChart>
         ) : (
-          // BARS — только расходы по дням
           <BarChart data={rawData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="bExp" x1="0" y1="0" x2="0" y2="1">
@@ -196,32 +184,25 @@ const totalIncome  = rawData.reduce((s, d) => s + d.income, 0);
         )}
       </ResponsiveContainer>
 
-      {/* Легенда — адаптивная: мобайл — колонка, десктоп — ряд */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 pt-2 border-t border-border/50">
         {view === "pulse" ? (
           <>
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-3 h-0.5 bg-[#10b981] rounded flex-shrink-0" />
               <span className="text-[11px] text-muted-foreground">Доход</span>
-              <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0">
-                {fmt(totalIncome)}
-              </span>
+              <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0">{fmt(totalIncome)}</span>
             </div>
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-3 h-0.5 bg-[#f43f5e] rounded flex-shrink-0" />
               <span className="text-[11px] text-muted-foreground">Расход</span>
-              <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0">
-                {fmt(totalExpense)}
-              </span>
+              <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0">{fmt(totalExpense)}</span>
             </div>
           </>
         ) : (
           <div className="flex items-center gap-2">
             <span className="w-3 h-3 rounded-sm bg-[#f43f5e] flex-shrink-0" />
             <span className="text-[11px] text-muted-foreground">Расходы за период</span>
-            <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto">
-              {fmt(totalExpense)}
-            </span>
+            <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto">{fmt(totalExpense)}</span>
           </div>
         )}
       </div>
