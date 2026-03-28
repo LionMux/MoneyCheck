@@ -56,11 +56,10 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "logout" }),
-      // Данные считаются устаревшими через 30 секунд
-      staleTime: 30_000,
-      // При возврате на вкладку — автообновление
+      // staleTime: 0 — любые данные считаются устаревшими сразу.
+      // invalidateQueries() теперь гарантированно запускает рефетч.
+      staleTime: 0,
       refetchOnWindowFocus: true,
-      // При восстановлении сети — автообновление
       refetchOnReconnect: true,
       retry: false,
     },
