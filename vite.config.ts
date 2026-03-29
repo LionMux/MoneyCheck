@@ -13,12 +13,6 @@ export default defineConfig({
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
   },
-  optimizeDeps: {
-    include: [
-      "@tanstack/react-query",
-      "@tanstack/query-core",
-    ],
-  },
   root: path.resolve(import.meta.dirname, "client"),
   base: "./",
   build: {
@@ -26,8 +20,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       onwarn(warning, warn) {
-        // Ignore circular deps and "use client" directive warnings from tanstack packages
-        if (warning.code === "CIRCULAR_DEPENDENCY") return;
+        // Suppress 'use client' directive warnings from @tanstack/react-query (harmless in client-only builds)
         if (
           warning.code === "MODULE_LEVEL_DIRECTIVE" &&
           warning.message.includes("use client")
