@@ -24,6 +24,19 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        // Ignore circular deps and "use client" directive warnings from tanstack packages
+        if (warning.code === "CIRCULAR_DEPENDENCY") return;
+        if (
+          warning.code === "MODULE_LEVEL_DIRECTIVE" &&
+          warning.message.includes("use client")
+        ) {
+          return;
+        }
+        warn(warning);
+      },
+    },
   },
   server: {
     fs: {
