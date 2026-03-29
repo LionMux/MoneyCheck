@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import TelegramBot from "node-telegram-bot-api";
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { exec } from "child_process";
+import { exec, spawn, ChildProcess } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from 'fs';
@@ -28,6 +28,80 @@ function isAdmin(chatId: number): boolean {
   return chatId === ADMIN_ID;
 }
 
+// ── Terminal state per chat ──────────────────────────────────────────────────
+interface TerminalSession {
+  cwd: string;
+  history: string[];
+  historyIndex: number;
+  activeProcess: ChildProcess | null;
+  activeMsgId: number | null;
+  mode: 'terminal' | null;
+}
+
+const sessions = new Map<number, TerminalSession>();
+
+function getSession(chatId: number): TerminalSession {
+  if (!sessions.has(chatId)) {
+    sessions.set(chatId, {
+      cwd: ROOT_DIR,
+      history: [],
+      historyIndex: -1,
+      activeProcess: null,
+      activeMsgId: null,
+      mode: null,
+    });
+  }
+  return sessions.get(chatId)!;
+}
+
+function formatPrompt(cwd: string): string {
+  // Show last 2 path segments for brevity
+  const parts = cwd.replace(/\\/g, '/').split('/');
+  const short = parts.slice(-2).join('/');
+  return `PS ${short}>`;
+}
+
+function escapeMarkdown(text: string): string {
+  return text.replace(/[`]/g, "'");
+}
+
+function buildTerminalMessage(session: TerminalSession, output?: string, isError = false): string {
+  const prompt = formatPrompt(session.cwd);
+  const historyLines = session.history.slice(-5).map(h => `  ${h}`).join('\n');
+  const historyBlock = historyLines ? `📜 *История (последние 5):*\n\`\`\`\n${historyLines}\n\`\`\`\n` : '';
+  const outputBlock = output
+    ? `${isError ? '❌' : '✅'} *Вывод:*\n\`\`\`\n${escapeMarkdown(output.slice(-1800))}\n\`\`\`\n`
+    : '';
+  return (
+    `🖥️ *PowerShell Terminal*\n\n` +
+    historyBlock +
+    outputBlock +
+    `\`\`\`\n${prompt}\n\`\`\`` +
+    `\n\n_Введи команду следующим сообщением_`
+  );
+}
+
+const terminalControlMenu = {
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: "⬆️ История ↑", callback_data: "term_hist_up" },
+        { text: "⬇️ История ↓", callback_data: "term_hist_down" },
+      ],
+      [
+        { text: "🔴 Ctrl+C (прервать)", callback_data: "term_ctrlc" },
+        { text: "🧹 Очистить историю", callback_data: "term_clear" },
+      ],
+      [
+        { text: "📂 ls (список файлов)", callback_data: "term_ls" },
+        { text: "📊 pm2 list", callback_data: "term_pm2" },
+      ],
+      [{ text: "❌ Закрыть терминал", callback_data: "term_exit" }],
+    ]
+  }
+};
+
+// ── Main menu ────────────────────────────────────────────────────────────────
 const mainMenu = {
   reply_markup: {
     inline_keyboard: [
@@ -36,11 +110,12 @@ const mainMenu = {
       [{ text: "📊 Статус процессов", callback_data: "status" }],
       [{ text: "🖥️ Железо сервера", callback_data: "stats" }],
       [{ text: "📋 Последние логи", callback_data: "logs" }],
+      [{ text: "💻 Terminal", callback_data: "terminal" }],
     ]
   }
 };
 
-// ── Флаг-файл хранит chatId + msgId чтобы после рестарта отредактировать то же сообщение
+// ── Restart flag ─────────────────────────────────────────────────────────────
 const RESTART_FLAG = path.join(ROOT_DIR, '.bot_restarted');
 
 if (fs.existsSync(RESTART_FLAG)) {
@@ -58,6 +133,7 @@ if (fs.existsSync(RESTART_FLAG)) {
   }
 }
 
+// ── /start ───────────────────────────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   if (!isAdmin(chatId)) return bot.sendMessage(chatId, "⛔ Доступ запрещён");
@@ -67,6 +143,123 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
+// ── Terminal: handle text input ───────────────────────────────────────────────
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+  if (!msg.text || msg.text.startsWith('/')) return;
+
+  const session = getSession(chatId);
+  if (session.mode !== 'terminal') return;
+
+  const input = msg.text.trim();
+
+  // Delete user's message for cleaner UX
+  bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+
+  // Handle built-in: cd
+  if (input.startsWith('cd ') || input === 'cd') {
+    const target = input === 'cd' ? ROOT_DIR : input.slice(3).trim();
+    const newPath = path.isAbsolute(target) ? target : path.resolve(session.cwd, target);
+    if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
+      session.cwd = newPath;
+      session.history.push(input);
+      session.historyIndex = session.history.length;
+      const text = buildTerminalMessage(session);
+      if (session.activeMsgId) {
+        bot.editMessageText(text, {
+          chat_id: chatId, message_id: session.activeMsgId,
+          parse_mode: "Markdown", ...terminalControlMenu
+        }).catch(() => {});
+      }
+    } else {
+      const text = buildTerminalMessage(session, `cd: путь не найден: ${newPath}`, true);
+      if (session.activeMsgId) {
+        bot.editMessageText(text, {
+          chat_id: chatId, message_id: session.activeMsgId,
+          parse_mode: "Markdown", ...terminalControlMenu
+        }).catch(() => {});
+      }
+    }
+    return;
+  }
+
+  // Handle built-in: clear
+  if (input === 'clear' || input === 'cls') {
+    session.history = [];
+    const text = buildTerminalMessage(session);
+    if (session.activeMsgId) {
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: session.activeMsgId,
+        parse_mode: "Markdown", ...terminalControlMenu
+      }).catch(() => {});
+    }
+    return;
+  }
+
+  // Handle built-in: exit
+  if (input === 'exit') {
+    session.mode = null;
+    if (session.activeMsgId) {
+      bot.editMessageText(
+        `👋 *Терминал закрыт*\n\nВозвращаемся в главное меню.`,
+        { chat_id: chatId, message_id: session.activeMsgId, parse_mode: "Markdown", ...mainMenu }
+      ).catch(() => {});
+    }
+    return;
+  }
+
+  // Add to history
+  session.history.push(input);
+  session.historyIndex = session.history.length;
+
+  // Show "running" state
+  if (session.activeMsgId) {
+    bot.editMessageText(
+      `🖥️ *PowerShell Terminal*\n\n⏳ Выполняется...\n\`\`\`\n${formatPrompt(session.cwd)} ${input}\n\`\`\``,
+      { chat_id: chatId, message_id: session.activeMsgId, parse_mode: "Markdown" }
+    ).catch(() => {});
+  }
+
+  // Execute in PowerShell
+  const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', input], {
+    cwd: session.cwd,
+    windowsHide: true,
+  });
+
+  session.activeProcess = proc;
+  let stdout = '';
+  let stderr = '';
+
+  proc.stdout.on('data', (d) => { stdout += d.toString(); });
+  proc.stderr.on('data', (d) => { stderr += d.toString(); });
+
+  proc.on('close', (code) => {
+    session.activeProcess = null;
+    const output = (stdout + stderr).trim() || '(нет вывода)';
+    const isError = code !== 0;
+    const text = buildTerminalMessage(session, output, isError);
+    if (session.activeMsgId) {
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: session.activeMsgId,
+        parse_mode: "Markdown", ...terminalControlMenu
+      }).catch(() => {});
+    }
+  });
+
+  proc.on('error', (err) => {
+    session.activeProcess = null;
+    const text = buildTerminalMessage(session, `Ошибка запуска: ${err.message}`, true);
+    if (session.activeMsgId) {
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: session.activeMsgId,
+        parse_mode: "Markdown", ...terminalControlMenu
+      }).catch(() => {});
+    }
+  });
+});
+
+// ── formatStatus ─────────────────────────────────────────────────────────────
 function formatStatus(raw: string): string {
   const lines = raw.split('\n').filter(l => l.includes('online') || l.includes('stopped') || l.includes('errored'));
   if (!lines.length) return '❓ Нет данных';
@@ -84,6 +277,7 @@ function formatStatus(raw: string): string {
   }).join('\n\n');
 }
 
+// ── callback_query ────────────────────────────────────────────────────────────
 bot.on('callback_query', async (query) => {
   const chatId = query.message!.chat.id;
   const msgId = query.message!.message_id;
@@ -94,19 +288,115 @@ bot.on('callback_query', async (query) => {
   }
 
   bot.answerCallbackQuery(query.id);
+  const session = getSession(chatId);
 
+  // ── Terminal callbacks ───────────────────────────────────────────────────
+  if (query.data === "terminal") {
+    session.mode = 'terminal';
+    session.activeMsgId = msgId;
+    const text = buildTerminalMessage(session);
+    bot.editMessageText(text, {
+      chat_id: chatId, message_id: msgId,
+      parse_mode: "Markdown", ...terminalControlMenu
+    });
+    return;
+  }
+
+  if (query.data === "term_exit") {
+    session.mode = null;
+    session.activeMsgId = null;
+    bot.editMessageText(
+      `👋 *Терминал закрыт*`,
+      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+    );
+    return;
+  }
+
+  if (query.data === "term_ctrlc") {
+    if (session.activeProcess) {
+      session.activeProcess.kill('SIGTERM');
+      session.activeProcess = null;
+      const text = buildTerminalMessage(session, '^C — процесс прерван', true);
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: msgId,
+        parse_mode: "Markdown", ...terminalControlMenu
+      });
+    } else {
+      bot.answerCallbackQuery(query.id, { text: "Нет активного процесса" });
+    }
+    return;
+  }
+
+  if (query.data === "term_clear") {
+    session.history = [];
+    const text = buildTerminalMessage(session);
+    bot.editMessageText(text, {
+      chat_id: chatId, message_id: msgId,
+      parse_mode: "Markdown", ...terminalControlMenu
+    });
+    return;
+  }
+
+  if (query.data === "term_hist_up") {
+    if (session.history.length === 0) {
+      bot.answerCallbackQuery(query.id, { text: "История пуста" });
+      return;
+    }
+    session.historyIndex = Math.max(0, session.historyIndex - 1);
+    const cmd = session.history[session.historyIndex];
+    bot.answerCallbackQuery(query.id, { text: `↑ ${cmd}` });
+    return;
+  }
+
+  if (query.data === "term_hist_down") {
+    if (session.history.length === 0) {
+      bot.answerCallbackQuery(query.id, { text: "История пуста" });
+      return;
+    }
+    session.historyIndex = Math.min(session.history.length - 1, session.historyIndex + 1);
+    const cmd = session.history[session.historyIndex];
+    bot.answerCallbackQuery(query.id, { text: `↓ ${cmd}` });
+    return;
+  }
+
+  if (query.data === "term_ls") {
+    session.mode = 'terminal';
+    session.activeMsgId = msgId;
+    const items = fs.readdirSync(session.cwd).map(f => {
+      const full = path.join(session.cwd, f);
+      const isDir = fs.statSync(full).isDirectory();
+      return isDir ? `📁 ${f}` : `📄 ${f}`;
+    }).join('\n');
+    const text = buildTerminalMessage(session, items || '(пусто)');
+    bot.editMessageText(text, {
+      chat_id: chatId, message_id: msgId,
+      parse_mode: "Markdown", ...terminalControlMenu
+    });
+    return;
+  }
+
+  if (query.data === "term_pm2") {
+    session.mode = 'terminal';
+    session.activeMsgId = msgId;
+    exec('pm2 list --no-color', (_, stdout, stderr) => {
+      const text = buildTerminalMessage(session, (stdout || stderr).trim());
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: msgId,
+        parse_mode: "Markdown", ...terminalControlMenu
+      });
+    });
+    return;
+  }
+
+  // ── Restart bot ───────────────────────────────────────────────────────────
   if (query.data === "restart_bot") {
     const start = Date.now();
-
     bot.editMessageText(
       `⏳ *Restart tg-bot...*\n\n\`git pull → restart\`\n\nЖди сообщение о завершении...`,
       { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
     );
-
-    // git pull перед рестартом
     exec(`cd ${ROOT_DIR} && git pull origin main`, (error, stdout, stderr) => {
       const elapsed = Math.round((Date.now() - start) / 1000);
-
       if (error) {
         bot.editMessageText(
           `❌ *git pull завершился с ошибкой*\n\n\`\`\`\n${(stderr || error.message).slice(-800)}\n\`\`\``,
@@ -114,14 +404,13 @@ bot.on('callback_query', async (query) => {
         );
         return;
       }
-
-      // Сохраняем chatId, msgId и elapsed в флаг-файл
       fs.writeFileSync(RESTART_FLAG, JSON.stringify({ chatId, msgId, elapsed }));
-      exec('pm2 restart tg-bot'); // бот умирает здесь
+      exec('pm2 restart tg-bot');
     });
     return;
   }
 
+  // ── Status ────────────────────────────────────────────────────────────────
   if (query.data === "status") {
     exec("pm2 list --no-color", (_, stdout) => {
       const formatted = formatStatus(stdout);
@@ -132,6 +421,7 @@ bot.on('callback_query', async (query) => {
     });
   }
 
+  // ── Logs ──────────────────────────────────────────────────────────────────
   if (query.data === "logs") {
     exec("pm2 logs moneycheck --nostream --lines 20 --no-color", (_, stdout, stderr) => {
       const output = (stdout || stderr).slice(-1500);
@@ -142,6 +432,7 @@ bot.on('callback_query', async (query) => {
     });
   }
 
+  // ── Stats ─────────────────────────────────────────────────────────────────
   if (query.data === "stats") {
     const [cpu, mem, temp, disk, load] = await Promise.all([
       si.cpu(), si.mem(), si.cpuTemperature(), si.fsSize(), si.currentLoad()
@@ -169,6 +460,7 @@ bot.on('callback_query', async (query) => {
     );
   }
 
+  // ── Rebuild ───────────────────────────────────────────────────────────────
   if (query.data === "rebuild") {
     bot.editMessageText(
       `⏳ *Rebuild запущен...*\n\n\`git pull → build → restart\`\n\nЖди сообщение о завершении...`,
