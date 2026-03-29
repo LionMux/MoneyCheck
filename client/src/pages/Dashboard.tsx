@@ -82,7 +82,7 @@ export default function Dashboard() {
 
   const monthTxs = transactions.filter(t => t.date.startsWith(currentDisplayMonth));
 
-  // creditPayment = перевод, не доход и не расход
+  // creditPayment = перевод на кредитку, не доход и не расход
   const income  = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const expense = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
 
@@ -92,8 +92,9 @@ export default function Dashboard() {
   const monthLabel    = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
   const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
 
+  // Круговая диаграмма: только расходы текущего месяца, без переводов на кредитку
   const catData = Object.entries(
-    transactions
+    monthTxs
       .filter(t => t.type === "expense" || t.type === "creditPurchase")
       .reduce((acc, t) => {
         acc[t.category] = (acc[t.category] || 0) + Math.abs(t.amount);
@@ -196,7 +197,7 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Расходы по категориям</CardTitle>
+              <CardTitle className="text-sm font-semibold">Расходы по категориям · {monthLabelCap}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-3 pt-1">
               <ResponsiveContainer width="100%" height={160}>
