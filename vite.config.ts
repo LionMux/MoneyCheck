@@ -13,6 +13,12 @@ export default defineConfig({
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
   },
+  optimizeDeps: {
+    include: [
+      "@tanstack/react-query",
+      "@tanstack/query-core",
+    ],
+  },
   root: path.resolve(import.meta.dirname, "client"),
   base: "./",
   build: {
