@@ -1,7 +1,7 @@
 import { type Express } from "express";
 import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
-import viteConfig from "../vite.config";
+import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
@@ -16,8 +16,22 @@ export async function setupVite(server: Server, app: Express) {
   };
 
   const vite = await createViteServer({
-    ...viteConfig,
+    // Inline config — do NOT import vite.config.ts here.
+    // A static import would be resolved by esbuild during server bundle
+    // and pull the entire client module graph into the production build.
     configFile: false,
+    plugins: [react()],
+    resolve: {
+      alias: {
+        "@": path.resolve(import.meta.dirname, "..", "client", "src"),
+        "@shared": path.resolve(import.meta.dirname, "..", "shared"),
+        "@assets": path.resolve(import.meta.dirname, "..", "attached_assets"),
+      },
+    },
+    root: path.resolve(import.meta.dirname, "..", "client"),
+    base: "./",
+    server: serverOptions,
+    appType: "custom",
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
@@ -25,8 +39,6 @@ export async function setupVite(server: Server, app: Express) {
         process.exit(1);
       },
     },
-    server: serverOptions,
-    appType: "custom",
   });
 
   app.use(vite.middlewares);
@@ -42,7 +54,6 @@ export async function setupVite(server: Server, app: Express) {
         "index.html",
       );
 
-      // always reload the index.html file from disk incase it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,
