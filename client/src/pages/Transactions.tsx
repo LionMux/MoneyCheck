@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, Wallet, Banknote, ChevronDown, ArrowLeftRight } from "lucide-react";
+import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, ChevronDown, ArrowLeftRight, MoveRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -18,6 +18,7 @@ import { ru } from "date-fns/locale";
 interface Category { id: number; name: string; type: string; }
 
 type FilterType = "all" | "income" | "expense" | "transfer";
+type FormMode  = "expense" | "income" | "transfer";
 
 const FILTERS: { value: FilterType; label: string }[] = [
   { value: "all",      label: "Все" },
@@ -39,11 +40,11 @@ function resolveType(formType: "income" | "expense", account?: Account): string 
 }
 
 // ── Строка транзакции ────────────────────────────────────────────────────
-function TxRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
+function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[]; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
   const isIncome   = tx.type === "income";
-  const isTransfer = tx.type === "creditPayment";
+  const isTransfer = tx.type === "transfer" || tx.type === "creditPayment";
   const isExpense  = tx.type === "expense" || tx.type === "creditPurchase";
 
   const amountColor = isIncome ? "text-income" : isTransfer ? "text-blue-500" : "text-expense";
@@ -57,8 +58,9 @@ function TxRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
     : isTransfer
     ? <ArrowLeftRight size={14} className="text-blue-500" />
     : <TrendingDown size={14} className="text-expense" />;
-  const prefix = isIncome ? "+" : "−";
+  const prefix = isIncome || (isTransfer && tx.amount > 0) ? "+" : "−";
 
+  const txAccount = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
   const isTruncated = tx.title.length > 28;
 
   return (
@@ -85,8 +87,20 @@ function TxRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-            <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
+            {tx.type === "transfer" ? (
+              <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300">
+                Перевод
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
+            )}
             <span className="text-xs text-muted-foreground">{formatDate(tx.date)}</span>
+            {txAccount && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: txAccount.color ?? "#20808D" }} />
+                {txAccount.name}
+              </span>
+            )}
             {tx.type === "creditPurchase" && (
               <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-orange-500 border-orange-300">Кредит</Badge>
             )}
@@ -113,13 +127,62 @@ function TxRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
   );
 }
 
+// ── Селектор счёта с цветовой точкой ────────────────────────────────────
+function AccountSelect({
+  value, onChange, accounts, placeholder, testId,
+}: {
+  value: number | undefined;
+  onChange: (id: number) => void;
+  accounts: Account[];
+  placeholder: string;
+  testId?: string;
+}) {
+  return (
+    <Select
+      value={value ? String(value) : ""}
+      onValueChange={v => onChange(Number(v))}
+    >
+      <SelectTrigger className="mt-1" data-testid={testId}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {accounts.map(acc => (
+          <SelectItem key={acc.id} value={String(acc.id)}>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: acc.color ?? "#10b981" }} />
+              <span>{acc.name}</span>
+              <span className="text-xs text-muted-foreground">
+                {acc.type === "credit" ? "(кредит)" : acc.type === "cash" ? "(нал)" : ""}
+              </span>
+            </div>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 // ── Главная страница ────────────────────────────────────────────────────
 export default function Transactions() {
   const { toast } = useToast();
-  const [open, setOpen]     = useState(false);
-  const [filter, setFilter] = useState<FilterType>("all");
-  const [form, setForm]     = useState<Partial<InsertTransaction> & { accountId?: number }>({
+  const [open, setOpen]       = useState(false);
+  const [filter, setFilter]   = useState<FilterType>("all");
+  const [mode, setMode]       = useState<FormMode>("expense");
+
+  // Форма обычной операции
+  const [form, setForm] = useState<Partial<InsertTransaction> & { accountId?: number }>({
     type: "expense",
+    date: format(new Date(), "yyyy-MM-dd"),
+  });
+
+  // Форма перевода
+  const [transfer, setTransfer] = useState<{
+    fromAccountId?: number;
+    toAccountId?: number;
+    amount?: number;
+    date: string;
+    note?: string;
+  }>({
     date: format(new Date(), "yyyy-MM-dd"),
   });
 
@@ -144,6 +207,20 @@ export default function Transactions() {
     },
   });
 
+  const transferMut = useMutation({
+    mutationFn: (data: typeof transfer) => apiRequest("POST", "/api/transfers", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setOpen(false);
+      setTransfer({ date: format(new Date(), "yyyy-MM-dd") });
+      toast({ title: "Перевод выполнен" });
+    },
+    onError: (e: any) => {
+      toast({ title: e.message ?? "Ошибка перевода", variant: "destructive" });
+    },
+  });
+
   const deleteMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`),
     onSuccess: () => {
@@ -155,17 +232,29 @@ export default function Transactions() {
   // ── Фильтрация ───────────────────────────────────────────────────────
   const filtered = transactions.filter(t => {
     if (filter === "all")      return true;
-    if (filter === "income")   return t.type === "income";                                // только чистый доход
-    if (filter === "expense")  return t.type === "expense" || t.type === "creditPurchase"; // покупки (в т.ч. кредитные)
-    if (filter === "transfer") return t.type === "creditPayment";                         // погашение = перевод
+    if (filter === "income")   return t.type === "income";
+    if (filter === "expense")  return t.type === "expense" || t.type === "creditPurchase";
+    if (filter === "transfer") return t.type === "transfer" || t.type === "creditPayment";
     return true;
   });
 
-  // ── Итоги (creditPayment — не доход и не расход) ──────────────────────────
+  // ── Итоги (transfer и creditPayment — не доход и не расход) ──────────
   const totalIncome  = transactions.filter(t => t.type === "income").reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalExpense = transactions.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
 
   const handleSubmit = () => {
+    if (mode === "transfer") {
+      if (!transfer.fromAccountId || !transfer.toAccountId || !transfer.amount) {
+        toast({ title: "Заполните все поля перевода", variant: "destructive" });
+        return;
+      }
+      if (transfer.fromAccountId === transfer.toAccountId) {
+        toast({ title: "Выберите разные счета", variant: "destructive" });
+        return;
+      }
+      transferMut.mutate(transfer as any);
+      return;
+    }
     if (!form.title || !form.amount || !form.category || !form.type || !form.date) {
       toast({ title: "Заполните все поля", variant: "destructive" });
       return;
@@ -182,7 +271,20 @@ export default function Transactions() {
     addMut.mutate(payload as InsertTransaction);
   };
 
-  const handleTypeChange = (t: "income" | "expense") => setForm(f => ({ ...f, type: t, category: undefined }));
+  const handleModeChange = (m: FormMode) => {
+    setMode(m);
+    if (m !== "transfer") setForm(f => ({ ...f, type: m, category: undefined }));
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+    setMode("expense");
+    setForm({ type: "expense", date: format(new Date(), "yyyy-MM-dd") });
+    setTransfer({ date: format(new Date(), "yyyy-MM-dd") });
+  };
+
+  const fromAcc = activeAccounts.find(a => a.id === transfer.fromAccountId);
+  const toAcc   = activeAccounts.find(a => a.id === transfer.toAccountId);
 
   return (
     <div className="space-y-6">
@@ -196,7 +298,7 @@ export default function Transactions() {
         </Button>
       </div>
 
-      {/* Фильтры — с горизонтальным скроллом на узких экранах */}
+      {/* Фильтры */}
       <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar" data-testid="filter-tabs">
         {FILTERS.map(f => (
           <button
@@ -243,7 +345,7 @@ export default function Transactions() {
           ) : (
             <div className="divide-y divide-border">
               {filtered.map(tx => (
-                <TxRow key={tx.id} tx={tx} onDelete={() => deleteMut.mutate(tx.id)} />
+                <TxRow key={tx.id} tx={tx} accounts={activeAccounts} onDelete={() => deleteMut.mutate(tx.id)} />
               ))}
             </div>
           )}
@@ -251,95 +353,203 @@ export default function Transactions() {
       </Card>
 
       {/* Диалог */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Новая операция</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {mode === "transfer" ? "Перевод между счетами" : "Новая операция"}
+            </DialogTitle>
+          </DialogHeader>
+
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              {(["expense", "income"] as const).map(t => (
-                <button key={t} onClick={() => handleTypeChange(t)} data-testid={`type-${t}`}
+            {/* Переключатель режима */}
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-muted rounded-xl">
+              {([
+                { v: "expense"  as FormMode, label: "Расход",  activeClass: "bg-red-50 border-red-300 text-red-700 dark:bg-red-900/20 dark:text-red-400" },
+                { v: "income"   as FormMode, label: "Доход",   activeClass: "bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" },
+                { v: "transfer" as FormMode, label: "Перевод", activeClass: "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400" },
+              ]).map(({ v, label, activeClass }) => (
+                <button
+                  key={v}
+                  onClick={() => handleModeChange(v)}
+                  data-testid={`type-${v}`}
                   className={cn(
-                    "py-2 rounded-lg text-sm font-medium border transition-all",
-                    form.type === t
-                      ? t === "income"
-                        ? "bg-emerald-50 border-emerald-400 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                        : "bg-red-50 border-red-400 text-red-700 dark:bg-red-900/20 dark:text-red-400"
-                      : "border-border text-muted-foreground hover:border-primary"
+                    "py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                    mode === v ? activeClass : "border-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {t === "expense" ? "Расход" : "Доход"}
+                  {label}
                 </button>
               ))}
             </div>
 
-            {activeAccounts.length > 0 && (
-              <div>
-                <Label>Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
-                <Select
-                  value={form.accountId ? String(form.accountId) : "none"}
-                  onValueChange={v => setForm(f => ({ ...f, accountId: v === "none" ? undefined : Number(v) }))}
-                >
-                  <SelectTrigger className="mt-1" data-testid="select-account">
-                    <SelectValue placeholder="Без счёта" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Без счёта</SelectItem>
-                    {activeAccounts.map(acc => (
-                      <SelectItem key={acc.id} value={String(acc.id)}>
-                        <div className="flex items-center gap-2">
-                          <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: acc.color ?? "#10b981" }} />
-                          <span>{acc.name}</span>
-                          <span className="text-xs text-muted-foreground ml-1">
-                            {acc.type === "credit" ? "(кредит)" : acc.type === "cash" ? "(наличные)" : ""}
-                          </span>
+            {/* ── Форма перевода ───────────────────────────────────── */}
+            {mode === "transfer" ? (
+              <>
+                {activeAccounts.length < 2 ? (
+                  <div className="py-6 text-center">
+                    <ArrowLeftRight size={32} className="mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">Для перевода нужно минимум два счёта</p>
+                    <p className="text-xs text-muted-foreground mt-1">Создайте их в разделе «Счета»</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Визуальная стрелка FROM → TO */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <Label className="text-xs text-muted-foreground">Откуда</Label>
+                        <AccountSelect
+                          value={transfer.fromAccountId}
+                          onChange={id => setTransfer(t => ({ ...t, fromAccountId: id }))}
+                          accounts={activeAccounts.filter(a => a.id !== transfer.toAccountId)}
+                          placeholder="Счёт-источник"
+                          testId="select-from-account"
+                        />
+                      </div>
+                      <div className="mt-5 flex-shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                          <MoveRight size={14} className="text-blue-500" />
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {isCreditSelected && (
-                  <p className="text-xs text-orange-500 mt-1.5 flex items-center gap-1">
-                    <CreditCard size={11} />
-                    {form.type === "expense" ? "Покупка в кредит — долг возрастёт" : "Погашение кредита — долг уменьшится"}
-                  </p>
-                )}
-              </div>
-            )}
+                      </div>
+                      <div className="flex-1">
+                        <Label className="text-xs text-muted-foreground">Куда</Label>
+                        <AccountSelect
+                          value={transfer.toAccountId}
+                          onChange={id => setTransfer(t => ({ ...t, toAccountId: id }))}
+                          accounts={activeAccounts.filter(a => a.id !== transfer.fromAccountId)}
+                          placeholder="Счёт-назначение"
+                          testId="select-to-account"
+                        />
+                      </div>
+                    </div>
 
-            <div>
-              <Label htmlFor="tx-title">Название</Label>
-              <Input id="tx-title" data-testid="input-tx-title" placeholder="Например, продукты"
-                value={form.title ?? ""} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="mt-1" />
-            </div>
-            <div>
-              <Label htmlFor="tx-amount">Сумма (₽)</Label>
-              <Input id="tx-amount" data-testid="input-tx-amount" type="number" placeholder="0"
-                value={form.amount ?? ""} onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))} className="mt-1" />
-            </div>
-            <div>
-              <Label>Категория</Label>
-              <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
-                <SelectTrigger data-testid="select-category" className="mt-1">
-                  <SelectValue placeholder="Выберите категорию" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredCategories.length === 0
-                    ? <SelectItem value="__none" disabled>Нет категорий — добавьте в Настройках</SelectItem>
-                    : filteredCategories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)
-                  }
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="tx-date">Дата</Label>
-              <Input id="tx-date" data-testid="input-tx-date" type="date"
-                value={form.date ?? ""} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="mt-1" />
-            </div>
+                    {/* Превью счетов если выбраны */}
+                    {fromAcc && toAcc && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: fromAcc.color ?? "#20808D" }} />
+                        <span className="text-xs font-medium text-blue-700 dark:text-blue-300 truncate">{fromAcc.name}</span>
+                        <ArrowLeftRight size={12} className="text-blue-400 flex-shrink-0 mx-0.5" />
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: toAcc.color ?? "#20808D" }} />
+                        <span className="text-xs font-medium text-blue-700 dark:text-blue-300 truncate">{toAcc.name}</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <Label htmlFor="tr-amount">Сумма (₽)</Label>
+                      <Input
+                        id="tr-amount"
+                        type="number"
+                        placeholder="0"
+                        value={transfer.amount ?? ""}
+                        onChange={e => setTransfer(t => ({ ...t, amount: Number(e.target.value) }))}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="tr-date">Дата</Label>
+                      <Input
+                        id="tr-date"
+                        type="date"
+                        value={transfer.date}
+                        onChange={e => setTransfer(t => ({ ...t, date: e.target.value }))}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="tr-note">Комментарий <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                      <Input
+                        id="tr-note"
+                        placeholder="Например, пополнение копилки"
+                        value={transfer.note ?? ""}
+                        onChange={e => setTransfer(t => ({ ...t, note: e.target.value }))}
+                        className="mt-1"
+                      />
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              /* ── Форма обычной операции ──────────────────────────── */
+              <>
+                {activeAccounts.length > 0 && (
+                  <div>
+                    <Label>Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                    <Select
+                      value={form.accountId ? String(form.accountId) : "none"}
+                      onValueChange={v => setForm(f => ({ ...f, accountId: v === "none" ? undefined : Number(v) }))}
+                    >
+                      <SelectTrigger className="mt-1" data-testid="select-account">
+                        <SelectValue placeholder="Без счёта" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Без счёта</SelectItem>
+                        {activeAccounts.map(acc => (
+                          <SelectItem key={acc.id} value={String(acc.id)}>
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: acc.color ?? "#10b981" }} />
+                              <span>{acc.name}</span>
+                              <span className="text-xs text-muted-foreground ml-1">
+                                {acc.type === "credit" ? "(кредит)" : acc.type === "cash" ? "(наличные)" : ""}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {isCreditSelected && (
+                      <p className="text-xs text-orange-500 mt-1.5 flex items-center gap-1">
+                        <CreditCard size={11} />
+                        {mode === "expense" ? "Покупка в кредит — долг возрастёт" : "Погашение кредита — долг уменьшится"}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <Label htmlFor="tx-title">Название</Label>
+                  <Input id="tx-title" data-testid="input-tx-title" placeholder="Например, продукты"
+                    value={form.title ?? ""} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="mt-1" />
+                </div>
+                <div>
+                  <Label htmlFor="tx-amount">Сумма (₽)</Label>
+                  <Input id="tx-amount" data-testid="input-tx-amount" type="number" placeholder="0"
+                    value={form.amount ?? ""} onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))} className="mt-1" />
+                </div>
+                <div>
+                  <Label>Категория</Label>
+                  <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
+                    <SelectTrigger data-testid="select-category" className="mt-1">
+                      <SelectValue placeholder="Выберите категорию" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredCategories.length === 0
+                        ? <SelectItem value="__none" disabled>Нет категорий — добавьте в Настройках</SelectItem>
+                        : filteredCategories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)
+                      }
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="tx-date">Дата</Label>
+                  <Input id="tx-date" data-testid="input-tx-date" type="date"
+                    value={form.date ?? ""} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="mt-1" />
+                </div>
+              </>
+            )}
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
-            <Button onClick={handleSubmit} data-testid="btn-submit-transaction" disabled={addMut.isPending}>
-              {addMut.isPending ? "Сохранение..." : "Добавить"}
+            <Button variant="outline" onClick={handleClose}>Отмена</Button>
+            <Button
+              onClick={handleSubmit}
+              data-testid="btn-submit-transaction"
+              disabled={addMut.isPending || transferMut.isPending}
+              className={mode === "transfer" ? "bg-blue-600 hover:bg-blue-700" : ""}
+            >
+              {(addMut.isPending || transferMut.isPending)
+                ? "Сохранение..."
+                : mode === "transfer" ? "Перевести" : "Добавить"
+              }
             </Button>
           </DialogFooter>
         </DialogContent>

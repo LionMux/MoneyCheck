@@ -35,7 +35,6 @@ function getUserId(req: AuthRequest): number {
   return req.userId ?? 1;
 }
 
-/** Зеркало resolveType из Transactions.tsx — работает и для внешних клиентов (Shortcuts, PAT) */
 function resolveTransactionType(
   rawType: string,
   accountType?: string
@@ -234,6 +233,83 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  // ── TRANSFERS ─────────────────────────────────────────────────────────────
+  // Внутренний перевод между счетами: создаёт две связанные транзакции
+  // (списание с fromAccountId + зачисление на toAccountId), оба type='transfer'.
+  // Не влияет на доходы/расходы — только двигает баланс между счетами.
+
+  app.post("/api/transfers", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const userId = getUserId(req);
+      const { fromAccountId, toAccountId, amount, date, note } = z.object({
+        fromAccountId: z.number(),
+        toAccountId:   z.number(),
+        amount:        z.number().positive(),
+        date:          z.string(),
+        note:          z.string().optional(),
+      }).parse(req.body);
+
+      if (fromAccountId === toAccountId) {
+        return res.status(400).json({ error: "Счёт-источник и счёт-назначение должны быть разными" });
+      }
+
+      const userAccounts = await pg.getAccounts(userId);
+      const fromAcc = userAccounts.find(a => a.id === fromAccountId);
+      const toAcc   = userAccounts.find(a => a.id === toAccountId);
+      if (!fromAcc || !toAcc) {
+        return res.status(404).json({ error: "Один из счетов не найден" });
+      }
+
+      const now = new Date().toISOString();
+      const title = `Перевод: ${fromAcc.name} → ${toAcc.name}`;
+      const category = "Перевод";
+
+      // Списание с источника (amount отрицательный)
+      const outTx = await pg.addTransaction(userId, {
+        userId,
+        accountId:  fromAccountId,
+        title,
+        amount:     -Math.abs(amount),
+        currency:   fromAcc.currency ?? "RUB",
+        category,
+        type:       "transfer",
+        date,
+        note:       note ?? null,
+        isPlanned:  false,
+        createdAt:  now,
+        categoryId: null,
+        counterparty: null,
+        linkedTransactionId: null,
+      } as any);
+
+      // Зачисление на назначение (amount положительный)
+      const inTx = await pg.addTransaction(userId, {
+        userId,
+        accountId:  toAccountId,
+        title,
+        amount:     Math.abs(amount),
+        currency:   toAcc.currency ?? "RUB",
+        category,
+        type:       "transfer",
+        date,
+        note:       note ?? null,
+        isPlanned:  false,
+        createdAt:  now,
+        categoryId: null,
+        counterparty: null,
+        linkedTransactionId: outTx.id,
+      } as any);
+
+      // Связываем outTx → inTx
+      await pg.updateTransaction(outTx.id, userId, { linkedTransactionId: inTx.id });
+
+      res.json({ out: { ...outTx, linkedTransactionId: inTx.id }, in: inTx });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   // ── TRANSACTIONS ──────────────────────────────────────────────────────────
 
   app.get("/api/transactions", guard, async (req: AuthRequest, res) => {
@@ -249,7 +325,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     for (const t of txs) {
       const month = String(t.date).slice(0, 7);
       if (!map[month]) map[month] = { income: 0, expense: 0 };
-      // creditPayment — перевод, не учитывается ни в доходах, ни в расходах
+      // transfer и creditPayment — не учитываются в доходах/расходах
       if (t.type === "income") map[month].income += Number(t.amount);
       else if (t.type === "expense" || t.type === "creditPurchase") map[month].expense += Math.abs(Number(t.amount));
     }
@@ -303,8 +379,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/transactions/:id", guard, async (req: AuthRequest, res) => {
-    if (pg) await pg.deleteTransaction(Number(req.params.id), getUserId(req));
-    else await (mem as any).deleteTransaction(Number(req.params.id));
+    if (pg) {
+      const txId = Number(req.params.id);
+      const userId = getUserId(req);
+      // Если это перевод — удаляем и связанную транзакцию тоже
+      try {
+        const allTxs = await pg.getTransactions(userId);
+        const tx = allTxs.find(t => t.id === txId);
+        if (tx?.type === "transfer" && tx.linkedTransactionId) {
+          await pg.deleteTransaction(tx.linkedTransactionId, userId).catch(() => {});
+        }
+      } catch {}
+      await pg.deleteTransaction(txId, userId);
+    } else {
+      await (mem as any).deleteTransaction(Number(req.params.id));
+    }
     res.json({ ok: true });
   });
 
@@ -522,7 +611,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       let monthIncome = 0;
       let monthExpense = 0;
       for (const t of monthTxs) {
-        // creditPayment — перевод, не учитывается ни в доходах, ни в расходах
         if (t.type === "income") monthIncome += Number(t.amount);
         else if (t.type === "expense" || t.type === "creditPurchase") monthExpense += Math.abs(Number(t.amount));
       }
