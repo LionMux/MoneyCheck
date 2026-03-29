@@ -78,8 +78,8 @@ export default function ActivityChart({ transactions }: { transactions: Transact
         label,
         fullDate: format(d, "d MMM", { locale: ru }),
         // creditPayment — перевод, не доход и не расход
-        income:  dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
-        expense: dayTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0),
+        income:  dayTxs.filter(t => t.type === "income" && t.type !== "transfer").reduce((s, t) => s + t.amount, 0),
+        expense: dayTxs.filter(t => (t.type === "expense" || t.type === "creditPurchase") && t.type !== "transfer").reduce((s, t) => s + Math.abs(t.amount), 0),
       };
     });
   }, [transactions, range]);
@@ -96,20 +96,20 @@ export default function ActivityChart({ transactions }: { transactions: Transact
   const totalIncome  = rawData.reduce((s, d) => s + d.income, 0);
   const totalExpense = rawData.reduce((s, d) => s + d.expense, 0);
 
-  const tickEvery = range === "month" ? 4 : 1;
+  const tickEvery = range === \"month\" ? 4 : 1;
   const xTicks = rawData.filter((_, i) => i % tickEvery === 0).map(d => d.label);
-  const barMax = range === "month" ? 8 : 22;
+  const barMax = range === \"month\" ? 8 : 22;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-start justify-between gap-2">
+    <div className=\"space-y-3\">
+      <div className=\"flex items-start justify-between gap-2\">
         <div>
-          <p className="text-sm font-semibold leading-none">Activity</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            {range === "7d" ? "Последние 7 дней" : range === "14d" ? "Последние 14 дней" : "Текущий месяц"}
+          <p className=\"text-sm font-semibold leading-none\">Activity</p>
+          <p className=\"text-[11px] text-muted-foreground mt-0.5\">
+            {range === \"7d\" ? \"Последние 7 дней\" : range === \"14d\" ? \"Последние 14 дней\" : \"Текущий месяц\"}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1.5">
+        <div className=\"flex flex-col items-end gap-1.5\">
           <SegmentedControl
             options={Object.entries(RANGE_LABELS).map(([v, l]) => ({ value: v as Range, label: l }))}
             value={range} onChange={setRange}
@@ -121,88 +121,88 @@ export default function ActivityChart({ transactions }: { transactions: Transact
         </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={180}>
-        {view === "pulse" ? (
+      <ResponsiveContainer width=\"100%\" height={180}>
+        {view === \"pulse\" ? (
           <AreaChart data={pulseData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
             <defs>
-              <linearGradient id="acInc" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"  stopColor="#10b981" stopOpacity={0.3} />
-                <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+              <linearGradient id=\"acInc\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">
+                <stop offset=\"0%\"  stopColor=\"#10b981\" stopOpacity={0.3} />
+                <stop offset=\"100%\" stopColor=\"#10b981\" stopOpacity={0} />
               </linearGradient>
-              <linearGradient id="acExp" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"  stopColor="#f43f5e" stopOpacity={0.3} />
-                <stop offset="100%" stopColor="#f43f5e" stopOpacity={0} />
+              <linearGradient id=\"acExp\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">
+                <stop offset=\"0%\"  stopColor=\"#f43f5e\" stopOpacity={0.3} />
+                <stop offset=\"100%\" stopColor=\"#f43f5e\" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-            <XAxis dataKey="label" ticks={xTicks}
-              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            <CartesianGrid strokeDasharray=\"3 3\" stroke=\"hsl(var(--border))\" vertical={false} />
+            <XAxis dataKey=\"label\" ticks={xTicks}
+              tick={{ fontSize: 10, fill: \"hsl(var(--muted-foreground))\" }}
               axisLine={false} tickLine={false}
             />
-            <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            <YAxis tick={{ fontSize: 10, fill: \"hsl(var(--muted-foreground))\" }}
               axisLine={false} tickLine={false} tickFormatter={fmtY} width={36}
             />
             <RechartsTooltip
               contentStyle={TS} itemStyle={TI} labelStyle={TL}
-              labelFormatter={(_, items) => items?.[0]?.payload?.fullDate ?? ""}
+              labelFormatter={(_, items) => items?.[0]?.payload?.fullDate ?? \"\"}
               formatter={(v: number, name: string) => [fmt(v), name]}
             />
-            <Area type="monotone" dataKey="cumInc" name="Доход (итог)"
-              stroke="#10b981" strokeWidth={2} fill="url(#acInc)" dot={false}
-              activeDot={{ r: 4, fill: "#10b981", stroke: "white", strokeWidth: 2 }}
+            <Area type=\"monotone\" dataKey=\"cumInc\" name=\"Доход (итог)\"
+              stroke=\"#10b981\" strokeWidth={2} fill=\"url(#acInc)\" dot={false}
+              activeDot={{ r: 4, fill: \"#10b981\", stroke: \"white\", strokeWidth: 2 }}
             />
-            <Area type="monotone" dataKey="cumExp" name="Расход (итог)"
-              stroke="#f43f5e" strokeWidth={2} fill="url(#acExp)" dot={false}
-              activeDot={{ r: 4, fill: "#f43f5e", stroke: "white", strokeWidth: 2 }}
+            <Area type=\"monotone\" dataKey=\"cumExp\" name=\"Расход (итог)\"
+              stroke=\"#f43f5e\" strokeWidth={2} fill=\"url(#acExp)\" dot={false}
+              activeDot={{ r: 4, fill: \"#f43f5e\", stroke: \"white\", strokeWidth: 2 }}
             />
           </AreaChart>
         ) : (
           <BarChart data={rawData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
             <defs>
-              <linearGradient id="bExp" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"  stopColor="#f43f5e" stopOpacity={1} />
-                <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.5} />
+              <linearGradient id=\"bExp\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">
+                <stop offset=\"0%\"  stopColor=\"#f43f5e\" stopOpacity={1} />
+                <stop offset=\"100%\" stopColor=\"#f43f5e\" stopOpacity={0.5} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-            <XAxis dataKey="label" ticks={xTicks}
-              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            <CartesianGrid strokeDasharray=\"3 3\" stroke=\"hsl(var(--border))\" vertical={false} />
+            <XAxis dataKey=\"label\" ticks={xTicks}
+              tick={{ fontSize: 10, fill: \"hsl(var(--muted-foreground))\" }}
               axisLine={false} tickLine={false}
             />
-            <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            <YAxis tick={{ fontSize: 10, fill: \"hsl(var(--muted-foreground))\" }}
               axisLine={false} tickLine={false} tickFormatter={fmtY} width={36}
             />
             <RechartsTooltip
               contentStyle={TS} itemStyle={TI} labelStyle={TL}
-              labelFormatter={(_, items) => items?.[0]?.payload?.fullDate ?? ""}
+              labelFormatter={(_, items) => items?.[0]?.payload?.fullDate ?? \"\"}
               formatter={(v: number, name: string) => [fmt(v), name]}
             />
-            <Bar dataKey="expense" name="Расход" fill="url(#bExp)"
+            <Bar dataKey=\"expense\" name=\"Расход\" fill=\"url(#bExp)\"
               radius={[4, 4, 0, 0]} maxBarSize={barMax}
             />
           </BarChart>
         )}
       </ResponsiveContainer>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 pt-2 border-t border-border/50">
-        {view === "pulse" ? (
+      <div className=\"flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 pt-2 border-t border-border/50\">
+        {view === \"pulse\" ? (
           <>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="w-3 h-0.5 bg-[#10b981] rounded flex-shrink-0" />
-              <span className="text-[11px] text-muted-foreground">Доход</span>
-              <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0">{fmt(totalIncome)}</span>
+            <div className=\"flex items-center gap-2 min-w-0\">
+              <span className=\"w-3 h-0.5 bg-[#10b981] rounded flex-shrink-0\" />
+              <span className=\"text-[11px] text-muted-foreground\">Доход</span>
+              <span className=\"text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0\">{fmt(totalIncome)}</span>
             </div>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="w-3 h-0.5 bg-[#f43f5e] rounded flex-shrink-0" />
-              <span className="text-[11px] text-muted-foreground">Расход</span>
-              <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0">{fmt(totalExpense)}</span>
+            <div className=\"flex items-center gap-2 min-w-0\">
+              <span className=\"w-3 h-0.5 bg-[#f43f5e] rounded flex-shrink-0\" />
+              <span className=\"text-[11px] text-muted-foreground\">Расход</span>
+              <span className=\"text-[11px] font-semibold tabular-nums text-foreground ml-auto sm:ml-0\">{fmt(totalExpense)}</span>
             </div>
           </>
         ) : (
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-sm bg-[#f43f5e] flex-shrink-0" />
-            <span className="text-[11px] text-muted-foreground">Расходы за период</span>
-            <span className="text-[11px] font-semibold tabular-nums text-foreground ml-auto">{fmt(totalExpense)}</span>
+          <div className=\"flex items-center gap-2\">
+            <span className=\"w-3 h-3 rounded-sm bg-[#f43f5e] flex-shrink-0\" />
+            <span className=\"text-[11px] text-muted-foreground\">Расходы за период</span>
+            <span className=\"text-[11px] font-semibold tabular-nums text-foreground ml-auto\">{fmt(totalExpense)}</span>
           </div>
         )}
       </div>
