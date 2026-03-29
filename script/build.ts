@@ -56,8 +56,14 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    // externals from package.json deps + vite.config (local file used only in dev)
-    external: [...externals, "./vite.config", "../vite.config", "vite.config"],
+    external: [
+      ...externals,
+      // dev-only modules — never needed in production bundle
+      "./vite",
+      "../vite.config",
+      "./vite.config",
+      "vite",
+    ],
     logLevel: "info",
   });
 }
