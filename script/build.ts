@@ -32,6 +32,24 @@ const allowlist = [
   "zod-validation-error",
 ];
 
+// esbuild plugin: intercept relative imports that resolve to dev-only modules
+// (e.g. ./vite -> server/vite.ts -> vite.config.ts -> @tanstack/react-query client graph)
+// These are dead code in production (guarded by NODE_ENV check) but esbuild
+// still resolves dynamic imports before tree-shaking, pulling in the full client bundle.
+const excludeDevModulesPlugin = {
+  name: "exclude-dev-modules",
+  setup(build: any) {
+    // Match any import path that ends with /vite or is exactly ./vite
+    build.onResolve({ filter: /(\/vite|vite\.config)/ }, (args: any) => {
+      // Only externalize relative imports (local files), not the 'vite' npm package
+      // which is already in externals via the deps list
+      if (args.path.startsWith(".") || args.path.includes("vite.config")) {
+        return { path: args.path, external: true };
+      }
+    });
+  },
+};
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
@@ -56,14 +74,8 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: [
-      ...externals,
-      // dev-only modules — never needed in production bundle
-      "./vite",
-      "../vite.config",
-      "./vite.config",
-      "vite",
-    ],
+    external: externals,
+    plugins: [excludeDevModulesPlugin],
     logLevel: "info",
   });
 }
