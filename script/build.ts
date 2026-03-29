@@ -6,7 +6,6 @@ import { rm, readFile } from "fs/promises";
 // which helps cold start times
 const allowlist = [
   "@google/generative-ai",
-  "@tanstack/react-query",
   "axios",
   "connect-pg-simple",
   "cors",
@@ -57,7 +56,8 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    // externals from package.json deps + vite.config (local file used only in dev)
+    external: [...externals, "./vite.config", "../vite.config", "vite.config"],
     logLevel: "info",
   });
 }
