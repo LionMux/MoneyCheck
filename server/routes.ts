@@ -58,9 +58,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   }
 
   // ── iOS SHORTCUTS ─────────────────────────────────────────────────────────
-  // GET /api/ios/shortcuts/:filename — отдаёт .shortcut файлы для iOS
-  // iOS Safari автоматически открывает файл в приложении «Команды»
-
   app.use("/api/ios", iosShortcutsRouter);
 
   // ── AUTH ──────────────────────────────────────────────────────────────────
@@ -90,6 +87,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
     const valid = await verifyPassword(password, user.hashedPassword);
     if (!valid) return res.status(401).json({ error: "Неверный email или пароль" });
+    // Update last login timestamp (non-blocking)
+    pg.touchLastLogin(user.id).catch(() => {});
     const token = signJwt(user.id);
     setCookieToken(res, token);
     res.json({ id: user.id, email: user.email, name: user.name });
@@ -131,6 +130,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   const guard = pg ? patOrJwtMiddleware : (_req: any, _res: any, next: any) => next();
+
+  // ── ADMIN ─────────────────────────────────────────────────────────────────
+  // Простой guard: только userId === 1 считается администратором.
+  // Для будущего расширения достаточно добавить поле isAdmin в таблицу users.
+
+  app.get("/api/admin/users", authMiddleware, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    if (req.userId !== 1) return res.status(403).json({ error: "Forbidden" });
+    try {
+      const users = await pg.getAllUsers();
+      res.json(users);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // ── PERSONAL ACCESS TOKENS (PAT) ─────────────────────────────────────────
 
@@ -241,9 +255,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── TRANSFERS ─────────────────────────────────────────────────────────────
-  // Внутренний перевод между счетами: создаёт две связанные транзакции
-  // (списание с fromAccountId + зачисление на toAccountId), оба type='transfer'.
-  // Не влияет на доходы/расходы — только двигает баланс между счетами.
 
   app.post("/api/transfers", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
@@ -268,7 +279,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Один из счетов не найден" });
       }
 
-      const now = new Date().toISOString();
+      const nowTs = new Date().toISOString();
       const title = `Перевод: ${fromAcc.name} → ${toAcc.name}`;
       const category = "Перевод";
 
@@ -283,7 +294,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         date,
         note:       note ?? null,
         isPlanned:  false,
-        createdAt:  now,
+        createdAt:  nowTs,
         categoryId: null,
         counterparty: null,
         linkedTransactionId: null,
@@ -300,7 +311,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         date,
         note:       note ?? null,
         isPlanned:  false,
-        createdAt:  now,
+        createdAt:  nowTs,
         categoryId: null,
         counterparty: null,
         linkedTransactionId: outTx.id,

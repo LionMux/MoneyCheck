@@ -236,6 +236,20 @@ export class PgStorage {
     return updated;
   }
 
+  /** Update lastLoginAt timestamp when user logs in */
+  async touchLastLogin(id: number): Promise<void> {
+    await db.update(S.users)
+      .set({ lastLoginAt: now() } as any)
+      .where(eq(S.users.id, id))
+      .catch(() => {}); // graceful: поле может отсутствовать в старых схемах
+  }
+
+  /** Returns all users for admin panel (without hashed passwords) */
+  async getAllUsers(): Promise<Omit<S.User, "hashedPassword">[]> {
+    const rows = await db.select().from(S.users).orderBy(asc(S.users.id));
+    return rows.map(({ hashedPassword: _, ...safe }) => safe);
+  }
+
   // ── ACCOUNTS ─────────────────────────────────────────────────────────────
 
   async getAccounts(userId: number): Promise<S.Account[]> {
@@ -318,6 +332,14 @@ export class PgStorage {
   async deleteTransaction(id: number, userId: number): Promise<void> {
     await db.delete(S.transactions)
       .where(and(eq(S.transactions.id, id), eq(S.transactions.userId, userId)));
+  }
+
+  async updateTransaction(id: number, userId: number, data: Partial<S.InsertTransaction>): Promise<S.Transaction> {
+    const [tx] = await db.update(S.transactions)
+      .set(data)
+      .where(and(eq(S.transactions.id, id), eq(S.transactions.userId, userId)))
+      .returning();
+    return tx;
   }
 
   // ── BUDGETS ───────────────────────────────────────────────────────────────
