@@ -17,6 +17,8 @@ import AuthPage from "@/pages/Auth";
 import NotFound from "@/pages/not-found";
 import WidgetAuthPage from "@/pages/WidgetAuth";
 import AdminUsersPage from "@/pages/AdminUsers";
+import ForgotPasswordPage from "@/pages/ForgotPassword";
+import ResetPasswordPage from "@/pages/ResetPassword";
 
 function SwitchingSpinner() {
   return (
@@ -34,10 +36,12 @@ function AppRouter() {
 
   return (
     <Switch>
-      {/* Публичный роут — без auth guard и без Layout */}
-      <Route path="/widget-auth" component={WidgetAuthPage} />
+      {/* ── Публичные роуты — без auth guard и Layout ── */}
+      <Route path="/widget-auth"       component={WidgetAuthPage} />
+      <Route path="/forgot-password"   component={ForgotPasswordPage} />
+      <Route path="/reset-password"    component={ResetPasswordPage} />
 
-      {/* Остальные роуты — требуют авторизации */}
+      {/* ── Остальные роуты — требуют авторизации ── */}
       <Route>
         {() => {
           if (!isDemo && !user) return <AuthPage />;
