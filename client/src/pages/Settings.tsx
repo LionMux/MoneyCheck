@@ -4,7 +4,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid,
-  Smartphone, Download, TrendingUp, TrendingDown
+  Smartphone, ArrowDownToLine, TrendingUp, TrendingDown, Zap, ChevronRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,92 @@ function formatDate(iso: string | null) {
 
 function isExpired(iso: string) {
   return new Date(iso) < new Date();
+}
+
+function ShortcutCard({
+  type,
+  onDownload,
+}: {
+  type: "rashod" | "dohod";
+  onDownload: () => void;
+}) {
+  const isRashod = type === "rashod";
+
+  return (
+    <button
+      onClick={onDownload}
+      className={[
+        "group relative w-full text-left rounded-2xl border overflow-hidden",
+        "transition-all duration-200 hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]",
+        isRashod
+          ? "border-red-500/20 bg-gradient-to-br from-red-950/40 via-card to-card hover:border-red-500/40 hover:shadow-red-900/20"
+          : "border-emerald-500/20 bg-gradient-to-br from-emerald-950/40 via-card to-card hover:border-emerald-500/40 hover:shadow-emerald-900/20",
+      ].join(" ")}
+    >
+      {/* Гловерный блик — glow-эффект */}
+      <div
+        className={[
+          "absolute -top-8 -right-8 w-32 h-32 rounded-full blur-3xl opacity-20 transition-opacity duration-300 group-hover:opacity-40",
+          isRashod ? "bg-red-500" : "bg-emerald-500",
+        ].join(" ")}
+      />
+
+      <div className="relative p-5 flex flex-col gap-4">
+        {/* Шапка с иконкой */}
+        <div className="flex items-start justify-between">
+          <div
+            className={[
+              "w-11 h-11 rounded-xl flex items-center justify-center",
+              isRashod ? "bg-red-500/15" : "bg-emerald-500/15",
+            ].join(" ")}
+          >
+            {isRashod
+              ? <TrendingDown size={20} className="text-red-400" />
+              : <TrendingUp size={20} className="text-emerald-400" />
+            }
+          </div>
+          <div
+            className={[
+              "flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider",
+              isRashod
+                ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+            ].join(" ")}
+          >
+            <Zap size={9} />
+            Shortcut
+          </div>
+        </div>
+
+        {/* Текст */}
+        <div>
+          <p className="text-base font-semibold tracking-tight">
+            {isRashod ? "Расход" : "Доход"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {isRashod
+              ? "Быстро записать трату с экрана блокировки"
+              : "Быстро записать доход без открытия приложения"
+            }
+          </p>
+        </div>
+
+        {/* Кнопка */}
+        <div
+          className={[
+            "flex items-center justify-center gap-2 w-full rounded-xl py-2.5 text-sm font-medium transition-colors",
+            isRashod
+              ? "bg-red-500/20 text-red-300 group-hover:bg-red-500/30"
+              : "bg-emerald-500/20 text-emerald-300 group-hover:bg-emerald-500/30",
+          ].join(" ")}
+        >
+          <ArrowDownToLine size={14} />
+          Добавить команду
+          <ChevronRight size={13} className="ml-auto opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-transform" />
+        </div>
+      </div>
+    </button>
+  );
 }
 
 export default function SettingsPage() {
@@ -189,60 +275,33 @@ export default function SettingsPage() {
         </TabsContent>
 
         {/* ── TAB: SHORTCUTS / ВИДЖЕТЫ ── */}
-        <TabsContent value="shortcuts" className="mt-6 space-y-4">
-          <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
-            <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
-            <span>
-              Нажмите кнопку с iPhone — iOS автоматически откроет приложение «Команды»
-              и предложит добавить виджет. Сначала создайте API-токен во вкладке «Токены».
-            </span>
+        <TabsContent value="shortcuts" className="mt-6 space-y-5">
+
+          {/* Шаги */}
+          <div className="space-y-2">
+            {[
+              { n: "1", text: "Перейдите во вкладку «API-токены» и создайте токен", sub: "Нужен для авторизации в Shortcuts" },
+              { n: "2", text: "Нажмите кнопку ниже с iPhone", sub: "iOS автоматически откроет приложение «Команды»" },
+              { n: "3", text: "Вставьте токен в шорткат и добавьте на экран блокировки", sub: "Быстрый ввод расходов без открытия браузера" },
+            ].map(({ n, text, sub }) => (
+              <div key={n} className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+                <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+                  {n}
+                </span>
+                <div>
+                  <p className="text-sm font-medium leading-tight">{text}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>
+                </div>
+              </div>
+            ))}
           </div>
 
+          {/* Карточки */}
           <div className="grid gap-3 sm:grid-cols-2">
-            {/* Карточка Расход */}
-            <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center flex-shrink-0">
-                  <TrendingDown size={20} className="text-red-500" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Виджет Расход</p>
-                  <p className="text-xs text-muted-foreground">Быстрое добавление траты</p>
-                </div>
-              </div>
-              <Button
-                className="w-full gap-2 bg-red-500 hover:bg-red-600 text-white"
-                onClick={() => handleDownloadShortcut("rashod")}
-              >
-                <Download size={15} />
-                Добавить команду расхода
-              </Button>
-            </div>
-
-            {/* Карточка Доход */}
-            <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-                  <TrendingUp size={20} className="text-emerald-500" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Виджет Доход</p>
-                  <p className="text-xs text-muted-foreground">Быстрое добавление дохода</p>
-                </div>
-              </div>
-              <Button
-                className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-                onClick={() => handleDownloadShortcut("dohod")}
-              >
-                <Download size={15} />
-                Добавить команду дохода
-              </Button>
-            </div>
+            <ShortcutCard type="rashod" onDownload={() => handleDownloadShortcut("rashod")} />
+            <ShortcutCard type="dohod" onDownload={() => handleDownloadShortcut("dohod")} />
           </div>
 
-          <p className="text-xs text-muted-foreground text-center pt-1">
-            Файлы <code className="bg-muted px-1 rounded">FinWiseRashod.shortcut</code> и <code className="bg-muted px-1 rounded">FinWiseDohod.shortcut</code>
-          </p>
         </TabsContent>
       </Tabs>
 
