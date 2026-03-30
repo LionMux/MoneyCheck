@@ -483,6 +483,7 @@ bot.on('callback_query', async (query) => {
           name: users.name,
           email: users.email,
           createdAt: users.createdAt,
+          lastLoginAt: users.lastLoginAt,
           lastActive: userProgress.lastActiveDate,
         })
         .from(users)
@@ -499,16 +500,21 @@ bot.on('callback_query', async (query) => {
 
       const lines = result.map((u, i) => {
         const created = formatDate(u.createdAt);
-        const lastSeen = u.lastActive ? formatDate(u.lastActive) : 'никогда';
+        // Показываем lastLoginAt если есть, иначе lastActiveDate из прогресса
+        const lastSeen = u.lastLoginAt
+          ? formatDate(u.lastLoginAt)
+          : u.lastActive
+            ? u.lastActive  // только дата YYYY-MM-DD без времени
+            : 'никогда';
         const name = u.name?.trim() || 'Без имени';
-        const status = u.lastActive ? '🟢' : '⚪️';
+        const status = u.lastLoginAt ? '🟢' : u.lastActive ? '🟡' : '⚪️';
         return `${status} *${i + 1}. ${name}*\n` +
                `   📧 \`${u.email}\`\n` +
-               `   📅 Регис႐рация: ${created}\n` +
+               `   📅 Регистрация: ${created}\n` +
                `   🕐 Последний заход: ${lastSeen}`;
       });
 
-      const header = `👥 *Пользова႐ели MoneyCheck*\n_Всего: ${result.length}_\n\n`;
+      const header = `👥 *Пользователи MoneyCheck*\n_Всего: ${result.length}_\n\n`;
       let chunks: string[] = [];
       let current = header;
 
@@ -560,7 +566,7 @@ bot.on('callback_query', async (query) => {
         return;
       }
       bot.sendMessage(chatId,
-        `✅ *Сеႈвеႈ успешно пеႈесобႈан!*\n\n⏱ Вႈемя: ${elapsed} сек\n\nВсе изменения пႈименены и сеႈвеႈ пеႈезапущен.`,
+        `✅ *Сервер успешно пересобран!*\n\n⏱ Время: ${elapsed} сек\n\nВсе изменения применены и сервер перезапущен.`,
         { parse_mode: "Markdown", ...mainMenu }
       );
     });
