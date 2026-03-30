@@ -16,6 +16,7 @@ import SettingsPage from "@/pages/Settings";
 import AuthPage from "@/pages/Auth";
 import NotFound from "@/pages/not-found";
 import WidgetAuthPage from "@/pages/WidgetAuth";
+import AdminUsersPage from "@/pages/AdminUsers";
 
 function SwitchingSpinner() {
   return (
@@ -51,6 +52,7 @@ function AppRouter() {
                 <Route path="/learn"         component={Learn} />
                 <Route path="/notifications" component={NotificationsPage} />
                 <Route path="/settings"      component={SettingsPage} />
+                <Route path="/admin/users"   component={AdminUsersPage} />
                 <Route component={NotFound} />
               </Switch>
             </Layout>
