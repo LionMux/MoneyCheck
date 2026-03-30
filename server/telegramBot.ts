@@ -6,6 +6,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from 'fs';
 import si from 'systeminformation';
+import pg from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { users, userProgress } from '../shared/schema.js';
+import { eq } from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +21,10 @@ console.log("TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "✅ " +
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const ADMIN_ID = Number(process.env.TELEGRAM_ADMIN_ID!);
+
+// ── DB connection ─────────────────────────────────────────────────────────────
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool);
 
 const proxyAgent = new HttpsProxyAgent('http://127.0.0.1:12334');
 const bot = new TelegramBot(BOT_TOKEN, {
@@ -55,7 +63,6 @@ function getSession(chatId: number): TerminalSession {
 }
 
 function formatPrompt(cwd: string): string {
-  // Show last 2 path segments for brevity
   const parts = cwd.replace(/\\/g, '/').split('/');
   const short = parts.slice(-2).join('/');
   return `PS ${short}>`;
@@ -109,6 +116,7 @@ const mainMenu = {
       [{ text: "🤖 Restart tg-bot", callback_data: "restart_bot" }],
       [{ text: "📊 Статус процессов", callback_data: "status" }],
       [{ text: "🖥️ Железо сервера", callback_data: "stats" }],
+      [{ text: "👥 Пользователи", callback_data: "users" }],
       [{ text: "📋 Последние логи", callback_data: "logs" }],
       [{ text: "💻 Terminal", callback_data: "terminal" }],
     ]
@@ -154,10 +162,8 @@ bot.on('message', async (msg) => {
 
   const input = msg.text.trim();
 
-  // Delete user's message for cleaner UX
   bot.deleteMessage(chatId, msg.message_id).catch(() => {});
 
-  // Handle built-in: cd
   if (input.startsWith('cd ') || input === 'cd') {
     const target = input === 'cd' ? ROOT_DIR : input.slice(3).trim();
     const newPath = path.isAbsolute(target) ? target : path.resolve(session.cwd, target);
@@ -184,7 +190,6 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Handle built-in: clear
   if (input === 'clear' || input === 'cls') {
     session.history = [];
     const text = buildTerminalMessage(session);
@@ -197,7 +202,6 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Handle built-in: exit
   if (input === 'exit') {
     session.mode = null;
     if (session.activeMsgId) {
@@ -209,11 +213,9 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Add to history
   session.history.push(input);
   session.historyIndex = session.history.length;
 
-  // Show "running" state
   if (session.activeMsgId) {
     bot.editMessageText(
       `🖥️ *PowerShell Terminal*\n\n⏳ Выполняется...\n\`\`\`\n${formatPrompt(session.cwd)} ${input}\n\`\`\``,
@@ -221,7 +223,6 @@ bot.on('message', async (msg) => {
     ).catch(() => {});
   }
 
-  // Execute in PowerShell
   const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', input], {
     cwd: session.cwd,
     windowsHide: true,
@@ -458,6 +459,78 @@ bot.on('callback_query', async (query) => {
       `⏱️ *Аптайм:* ${uptimeH}ч ${uptimeM}мин`,
       { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
     );
+  }
+
+  // ── Users ─────────────────────────────────────────────────────────────────
+  if (query.data === "users") {
+    try {
+      const result = await db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          createdAt: users.createdAt,
+          lastActive: userProgress.lastActiveDate,
+        })
+        .from(users)
+        .leftJoin(userProgress, eq(users.id, userProgress.userId))
+        .orderBy(users.id);
+
+      if (!result.length) {
+        bot.editMessageText(
+          `👥 *Пользователи*\n\nПока никто не зарегистрирован.`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+        );
+        return;
+      }
+
+      const lines = result.map((u, i) => {
+        const created = u.createdAt ? u.createdAt.slice(0, 10) : '—';
+        const lastSeen = u.lastActive ?? 'никогда';
+        const name = u.name?.trim() || 'Без имени';
+        const status = u.lastActive ? '🟢' : '⚪️';
+        return `${status} *${i + 1}. ${name}*\n` +
+               `   📧 \`${u.email}\`\n` +
+               `   📅 Регистрация: ${created}\n` +
+               `   🕐 Последний заход: ${lastSeen}`;
+      });
+
+      // Split into chunks of 4096 chars max (Telegram limit)
+      const header = `👥 *Пользователи MoneyCheck*\n_Всего: ${result.length}_\n\n`;
+      let chunks: string[] = [];
+      let current = header;
+
+      for (const line of lines) {
+        if ((current + line + '\n\n').length > 3800) {
+          chunks.push(current);
+          current = line + '\n\n';
+        } else {
+          current += line + '\n\n';
+        }
+      }
+      chunks.push(current);
+
+      // Edit original message with first chunk
+      await bot.editMessageText(chunks[0], {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown",
+        ...(chunks.length === 1 ? mainMenu : {})
+      });
+
+      // Send remaining chunks as new messages
+      for (let i = 1; i < chunks.length; i++) {
+        await bot.sendMessage(chatId, chunks[i], {
+          parse_mode: "Markdown",
+          ...(i === chunks.length - 1 ? mainMenu : {})
+        });
+      }
+    } catch (e: any) {
+      bot.editMessageText(
+        `❌ *Ошибка запроса к БД:*\n\`${e.message}\``,
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown", ...mainMenu }
+      );
+    }
   }
 
   // ── Rebuild ───────────────────────────────────────────────────────────────
