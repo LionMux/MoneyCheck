@@ -6,6 +6,7 @@ import {
   authMiddleware, patOrJwtMiddleware, AuthRequest, setCookieToken,
   clearCookieToken, signJwt, verifyPassword, generatePAT
 } from "./auth";
+import iosShortcutsRouter from "./ios-shortcuts";
 
 let _storage: import("./storage").IStorage | null = null;
 let _pgStorage: import("./storage-pg").PgStorage | null = null;
@@ -55,6 +56,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const { startScheduler } = await import("./scheduler");
     startScheduler(pg);
   }
+
+  // ── iOS SHORTCUTS ─────────────────────────────────────────────────────────
+  // GET /api/ios/shortcuts/:filename — отдаёт .shortcut файлы для iOS
+  // iOS Safari автоматически открывает файл в приложении «Команды»
+
+  app.use("/api/ios", iosShortcutsRouter);
 
   // ── AUTH ──────────────────────────────────────────────────────────────────
 
@@ -265,7 +272,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const title = `Перевод: ${fromAcc.name} → ${toAcc.name}`;
       const category = "Перевод";
 
-      // Списание с источника (amount отрицательный)
       const outTx = await pg.addTransaction(userId, {
         userId,
         accountId:  fromAccountId,
@@ -283,7 +289,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         linkedTransactionId: null,
       } as any);
 
-      // Зачисление на назначение (amount положительный)
       const inTx = await pg.addTransaction(userId, {
         userId,
         accountId:  toAccountId,
@@ -301,7 +306,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         linkedTransactionId: outTx.id,
       } as any);
 
-      // Связываем outTx → inTx
       await pg.updateTransaction(outTx.id, userId, { linkedTransactionId: inTx.id });
 
       res.json({ out: { ...outTx, linkedTransactionId: inTx.id }, in: inTx });
@@ -325,7 +329,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     for (const t of txs) {
       const month = String(t.date).slice(0, 7);
       if (!map[month]) map[month] = { income: 0, expense: 0 };
-      // transfer и creditPayment — не учитываются в доходах/расходах
       if (t.type === "income") map[month].income += Number(t.amount);
       else if (t.type === "expense" || t.type === "creditPurchase") map[month].expense += Math.abs(Number(t.amount));
     }
@@ -382,7 +385,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (pg) {
       const txId = Number(req.params.id);
       const userId = getUserId(req);
-      // Если это перевод — удаляем и связанную транзакцию тоже
       try {
         const allTxs = await pg.getTransactions(userId);
         const tx = allTxs.find(t => t.id === txId);
