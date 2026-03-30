@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid
+  Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid,
+  Smartphone, Download, TrendingUp, TrendingDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,6 +88,11 @@ export default function SettingsPage() {
   const handleCreate = () => createMutation.mutate(tokenName);
   const handleCloseNewToken = () => { setNewToken(null); setCreateOpen(false); };
 
+  const handleDownloadShortcut = (type: "rashod" | "dohod") => {
+    const filename = type === "rashod" ? "FinWiseRashod.shortcut" : "FinWiseDohod.shortcut";
+    window.location.href = `/api/ios/shortcuts/${filename}`;
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
@@ -103,6 +109,10 @@ export default function SettingsPage() {
           <TabsTrigger value="tokens" className="flex-1 gap-2">
             <Key size={15} />
             API-токены
+          </TabsTrigger>
+          <TabsTrigger value="shortcuts" className="flex-1 gap-2">
+            <Smartphone size={15} />
+            Виджеты
           </TabsTrigger>
         </TabsList>
 
@@ -176,6 +186,63 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        {/* ── TAB: SHORTCUTS / ВИДЖЕТЫ ── */}
+        <TabsContent value="shortcuts" className="mt-6 space-y-4">
+          <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
+            <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
+            <span>
+              Нажмите кнопку с iPhone — iOS автоматически откроет приложение «Команды»
+              и предложит добавить виджет. Сначала создайте API-токен во вкладке «Токены».
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {/* Карточка Расход */}
+            <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                  <TrendingDown size={20} className="text-red-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">Виджет Расход</p>
+                  <p className="text-xs text-muted-foreground">Быстрое добавление траты</p>
+                </div>
+              </div>
+              <Button
+                className="w-full gap-2 bg-red-500 hover:bg-red-600 text-white"
+                onClick={() => handleDownloadShortcut("rashod")}
+              >
+                <Download size={15} />
+                Добавить команду расхода
+              </Button>
+            </div>
+
+            {/* Карточка Доход */}
+            <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                  <TrendingUp size={20} className="text-emerald-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">Виджет Доход</p>
+                  <p className="text-xs text-muted-foreground">Быстрое добавление дохода</p>
+                </div>
+              </div>
+              <Button
+                className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => handleDownloadShortcut("dohod")}
+              >
+                <Download size={15} />
+                Добавить команду дохода
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground text-center pt-1">
+            Файлы <code className="bg-muted px-1 rounded">FinWiseRashod.shortcut</code> и <code className="bg-muted px-1 rounded">FinWiseDohod.shortcut</code>
+          </p>
         </TabsContent>
       </Tabs>
 
