@@ -236,6 +236,13 @@ export class PgStorage {
     return updated;
   }
 
+  /** Обновляет хешированный пароль пользователя */
+  async updateUserPassword(userId: number, newHashedPassword: string): Promise<void> {
+    await db.update(S.users)
+      .set({ hashedPassword: newHashedPassword })
+      .where(eq(S.users.id, userId));
+  }
+
   /** Update lastLoginAt timestamp when user logs in */
   async touchLastLogin(id: number): Promise<void> {
     await db.update(S.users)
@@ -248,6 +255,51 @@ export class PgStorage {
   async getAllUsers(): Promise<Omit<S.User, "hashedPassword">[]> {
     const rows = await db.select().from(S.users).orderBy(asc(S.users.id));
     return rows.map(({ hashedPassword: _, ...safe }) => safe);
+  }
+
+  // ── PASSWORD RESET TOKENS ─────────────────────────────────────────────────
+
+  /** Удаляет все неиспользованные токены пользователя и создаёт новый */
+  async createPasswordResetToken(
+    userId: number,
+    tokenHash: string,
+    expiresAt: string,
+    ip?: string,
+    userAgent?: string
+  ): Promise<S.PasswordResetToken> {
+    // Инвалидация старых токенов
+    await db.delete(S.passwordResetTokens)
+      .where(and(
+        eq(S.passwordResetTokens.userId, userId),
+        eq(S.passwordResetTokens.usedAt, null as any)
+      ));
+    const [token] = await db.insert(S.passwordResetTokens).values({
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt: now(),
+      ip: ip ?? null,
+      userAgent: userAgent ?? null,
+    }).returning();
+    return token;
+  }
+
+  /** Находит действующий токен по хешу */
+  async findPasswordResetToken(tokenHash: string): Promise<S.PasswordResetToken | null> {
+    const [token] = await db.select().from(S.passwordResetTokens)
+      .where(and(
+        eq(S.passwordResetTokens.tokenHash, tokenHash),
+        eq(S.passwordResetTokens.usedAt, null as any)
+      ))
+      .limit(1);
+    return token ?? null;
+  }
+
+  /** Помечает токен использованным */
+  async consumePasswordResetToken(id: number): Promise<void> {
+    await db.update(S.passwordResetTokens)
+      .set({ usedAt: now() })
+      .where(eq(S.passwordResetTokens.id, id));
   }
 
   // ── ACCOUNTS ─────────────────────────────────────────────────────────────
