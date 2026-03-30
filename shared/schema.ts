@@ -53,6 +53,21 @@ export const personalAccessTokens = pgTable("personal_access_tokens", {
 export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
 export type InsertPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
 
+// ─── PASSWORD RESET TOKENS ──────────────────────────────────────────────────
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id:         serial("id").primaryKey(),
+  userId:     integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash:  text("token_hash").notNull().unique(),
+  expiresAt:  text("expires_at").notNull(),
+  usedAt:     text("used_at"),
+  createdAt:  text("created_at").notNull().default(""),
+  ip:         text("ip"),
+  userAgent:  text("user_agent"),
+});
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+
 // ─── ACCOUNTS (debit / credit / cash / other) ──────────────────────────────
 
 export const accounts = pgTable("accounts", {
@@ -231,10 +246,15 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   completedLessons: many(completedLessons),
   notifications: many(notificationLog),
   personalAccessTokens: many(personalAccessTokens),
+  passwordResetTokens: many(passwordResetTokens),
 }));
 
 export const personalAccessTokensRelations = relations(personalAccessTokens, ({ one }) => ({
   user: one(users, { fields: [personalAccessTokens.userId], references: [users.id] }),
+}));
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, { fields: [passwordResetTokens.userId], references: [users.id] }),
 }));
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
