@@ -36,6 +36,19 @@ function isAdmin(chatId: number): boolean {
   return chatId === ADMIN_ID;
 }
 
+// ── Date formatter: any string/date → "DD.MM.YY HH:MM" ──────────────────────
+function formatDate(raw: string | null | undefined): string {
+  if (!raw) return '—';
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw.slice(0, 10);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(2);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}.${mm}.${yy} ${hh}:${min}`;
+}
+
 // ── Terminal state per chat ──────────────────────────────────────────────────
 interface TerminalSession {
   cwd: string;
@@ -485,18 +498,17 @@ bot.on('callback_query', async (query) => {
       }
 
       const lines = result.map((u, i) => {
-        const created = u.createdAt ? u.createdAt.slice(0, 10) : '—';
-        const lastSeen = u.lastActive ?? 'никогда';
+        const created = formatDate(u.createdAt);
+        const lastSeen = u.lastActive ? formatDate(u.lastActive) : 'никогда';
         const name = u.name?.trim() || 'Без имени';
         const status = u.lastActive ? '🟢' : '⚪️';
         return `${status} *${i + 1}. ${name}*\n` +
                `   📧 \`${u.email}\`\n` +
-               `   📅 Регистрация: ${created}\n` +
+               `   📅 Регис႐рация: ${created}\n` +
                `   🕐 Последний заход: ${lastSeen}`;
       });
 
-      // Split into chunks of 4096 chars max (Telegram limit)
-      const header = `👥 *Пользователи MoneyCheck*\n_Всего: ${result.length}_\n\n`;
+      const header = `👥 *Пользова႐ели MoneyCheck*\n_Всего: ${result.length}_\n\n`;
       let chunks: string[] = [];
       let current = header;
 
@@ -510,7 +522,6 @@ bot.on('callback_query', async (query) => {
       }
       chunks.push(current);
 
-      // Edit original message with first chunk
       await bot.editMessageText(chunks[0], {
         chat_id: chatId,
         message_id: msgId,
@@ -518,7 +529,6 @@ bot.on('callback_query', async (query) => {
         ...(chunks.length === 1 ? mainMenu : {})
       });
 
-      // Send remaining chunks as new messages
       for (let i = 1; i < chunks.length; i++) {
         await bot.sendMessage(chatId, chunks[i], {
           parse_mode: "Markdown",
@@ -550,7 +560,7 @@ bot.on('callback_query', async (query) => {
         return;
       }
       bot.sendMessage(chatId,
-        `✅ *Сервер успешно пересобран!*\n\n⏱ Время: ${elapsed} сек\n\nВсе изменения применены и сервер перезапущен.`,
+        `✅ *Сеႈвеႈ успешно пеႈесобႈан!*\n\n⏱ Вႈемя: ${elapsed} сек\n\nВсе изменения пႈименены и сеႈвеႈ пеႈезапущен.`,
         { parse_mode: "Markdown", ...mainMenu }
       );
     });
