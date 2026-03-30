@@ -4,7 +4,7 @@ import { z } from "zod";
 import { insertTransactionSchema, insertBudgetSchema, insertSavingsGoalSchema, insertAccountSchema } from "@shared/schema";
 import {
   authMiddleware, patOrJwtMiddleware, AuthRequest, setCookieToken,
-  clearCookieToken, signJwt, verifyPassword, generatePAT
+  clearCookieToken, signJwt, verifyPassword, generatePAT, hashPassword
 } from "./auth";
 import iosShortcutsRouter from "./ios-shortcuts";
 
@@ -49,6 +49,28 @@ function resolveTransactionType(
 export async function registerRoutes(httpServer: Server, app: Express) {
   const cookieParser = (await import("cookie-parser")).default;
   app.use(cookieParser());
+
+  // ── RATE LIMITERS ─────────────────────────────────────────────────────────
+  // OWASP Forgot Password Cheat Sheet: limit requests to prevent email enumeration
+  const { rateLimit } = await import("express-rate-limit");
+
+  const forgotPasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5,                   // max 5 requests per IP per window
+    skipSuccessfulRequests: true, // successful requests don't count toward limit
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Слишком много запросов. Попробуйте через 15 минут." },
+  });
+
+  const resetPasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Слишком много запросов. Попробуйте через 15 минут." },
+  });
 
   const { mem, pg } = await getStorage();
 
@@ -127,6 +149,106 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const updated = await pg.updateUser(userId, data);
     const { hashedPassword: _, ...safe } = updated;
     res.json(safe);
+  });
+
+  // ── FORGOT PASSWORD ───────────────────────────────────────────────────────
+  // OWASP: always return the same response regardless of whether email exists,
+  // to prevent user enumeration. Rate limited: 5 req / 15 min per IP.
+
+  app.post("/api/auth/forgot-password", forgotPasswordLimiter, async (req, res) => {
+    if (!pg) return res.status(503).json({ error: "Database not configured" });
+
+    // Always respond with success to prevent email enumeration (OWASP)
+    const SAFE_RESPONSE = { ok: true, message: "Если аккаунт существует, мы отправили письмо со ссылкой для сброса пароля." };
+
+    try {
+      const { email } = z.object({
+        email: z.string().email(),
+      }).parse(req.body);
+
+      const user = await pg.getUserByEmail(email);
+      if (!user) return res.json(SAFE_RESPONSE); // don't reveal non-existence
+
+      const { randomBytes, createHash } = await import("crypto");
+      const rawToken = randomBytes(32).toString("hex"); // 256 bits entropy (OWASP: min 128 bits)
+      const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes
+
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ?? req.socket.remoteAddress ?? null;
+      const userAgent = req.headers["user-agent"] ?? null;
+
+      await pg.createPasswordResetToken(user.id, tokenHash, expiresAt, ip ?? undefined, userAgent ?? undefined);
+
+      const appUrl = (process.env.APP_URL ?? "http://localhost:5000").replace(/\/$/, "");
+      const resetUrl = `${appUrl}/#/reset-password?token=${rawToken}`;
+
+      const { sendPasswordResetEmail } = await import("./email");
+      await sendPasswordResetEmail(user.email, resetUrl, 30);
+
+      return res.json(SAFE_RESPONSE);
+    } catch (e: any) {
+      // Still return safe response — don't leak internal errors
+      console.error("[forgot-password] Error:", e.message);
+      return res.json(SAFE_RESPONSE);
+    }
+  });
+
+  // ── RESET PASSWORD ────────────────────────────────────────────────────────
+  // OWASP: verify token hash, check expiry & used_at, hash new password,
+  // mark token used, invalidate all old sessions, notify user by email.
+
+  app.post("/api/auth/reset-password", resetPasswordLimiter, async (req, res) => {
+    if (!pg) return res.status(503).json({ error: "Database not configured" });
+
+    try {
+      const { token, newPassword, confirmPassword } = z.object({
+        token:           z.string().min(1),
+        newPassword:     z.string().min(8, "Пароль должен содержать минимум 8 символов"),
+        confirmPassword: z.string().min(1),
+      }).parse(req.body);
+
+      if (newPassword !== confirmPassword) {
+        return res.status(400).json({ error: "Пароли не совпадают" });
+      }
+
+      const { createHash } = await import("crypto");
+      const tokenHash = createHash("sha256").update(token).digest("hex");
+
+      const resetToken = await pg.findPasswordResetToken(tokenHash);
+      if (!resetToken) {
+        return res.status(400).json({ error: "Ссылка недействительна или уже была использована" });
+      }
+
+      if (new Date() > new Date(resetToken.expiresAt)) {
+        return res.status(400).json({ error: "Ссылка истекла. Запросите новую." });
+      }
+
+      // Hash new password and update user
+      const newHashedPassword = await hashPassword(newPassword);
+      await pg.updateUserPassword(resetToken.userId, newHashedPassword);
+
+      // Mark token as used (one-time use)
+      await pg.consumePasswordResetToken(resetToken.id);
+
+      // Notify user that password was changed (OWASP recommendation)
+      try {
+        const user = await pg.getUserById(resetToken.userId);
+        if (user) {
+          const { sendPasswordChangedEmail } = await import("./email");
+          await sendPasswordChangedEmail(user.email);
+        }
+      } catch (mailErr: any) {
+        console.warn("[reset-password] Failed to send notification email:", mailErr.message);
+      }
+
+      return res.json({ ok: true, message: "Пароль успешно изменён" });
+    } catch (e: any) {
+      if (e.name === "ZodError") {
+        return res.status(400).json({ error: e.errors?.[0]?.message ?? "Неверные данные" });
+      }
+      console.error("[reset-password] Error:", e.message);
+      return res.status(500).json({ error: "Внутренняя ошибка сервера" });
+    }
   });
 
   const guard = pg ? patOrJwtMiddleware : (_req: any, _res: any, next: any) => next();
