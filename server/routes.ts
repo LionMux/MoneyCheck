@@ -347,6 +347,59 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // ── PAT ЧЕРЕЗ ЛОГИН (для iOS Shortcuts — не требует cookie) ──────────────
+  // Логика:
+  //   1. Проверяем email + password
+  //   2. Если у пользователя уже есть действующий PAT — возвращаем его
+  //   3. Если нет — создаём новый с истечением 365 дней и возвращаем
+  // Шорткат сохраняет токен в finwise_token.txt и больше не трогает авторизацию.
+
+  app.post("/api/pat/login", async (req, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    try {
+      const { email, password } = z.object({
+        email:    z.string().email(),
+        password: z.string().min(1),
+      }).parse(req.body);
+
+      const user = await pg.getUserByEmail(email);
+      if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
+
+      const valid = await verifyPassword(password, user.hashedPassword);
+      if (!valid) return res.status(401).json({ error: "Неверный email или пароль" });
+
+      pg.touchLastLogin(user.id).catch(() => {});
+
+      // Проверяем наличие действующего PAT
+      const existingTokens = await pg.getPersonalAccessTokens(user.id);
+      const now = new Date();
+      const activePat = existingTokens.find(
+        (t) => !t.revokedAt && new Date(t.expiresAt) > now
+      );
+
+      if (activePat) {
+        // Токен уже есть — возвращаем его данные.
+        // Примечание: getPersonalAccessTokens не отдаёт сам token (по соображениям безопасности),
+        // поэтому получаем полную строку токена напрямую из БД.
+        const fullPat = await pg.getPersonalAccessTokenById(activePat.id, user.id);
+        if (fullPat) {
+          return res.json({ token: fullPat.token, expiresAt: fullPat.expiresAt, id: fullPat.id });
+        }
+      }
+
+      // Токена нет — создаём новый на 365 дней
+      const token = generatePAT();
+      const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+      const pat = await pg.createPersonalAccessToken(user.id, token, expiresAt, "iOS Shortcuts");
+
+      return res.json({ token, expiresAt: pat.expiresAt, id: pat.id });
+
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ error: "Неверный формат данных" });
+      res.status(500).json({ error: "Ошибка сервера" });
+    }
+  });
+
   // ── ACCOUNTS ─────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", guard, async (req: AuthRequest, res) => {
