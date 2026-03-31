@@ -54,17 +54,22 @@ export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
 export type InsertPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
 
 // ─── PASSWORD RESET TOKENS ──────────────────────────────────────────────────
+// tokenHash — SHA-256 of the raw hex token (legacy link-based flow, kept for compatibility)
+// codeHash  — SHA-256 of the 6-digit OTP code (new flow)
 
 export const passwordResetTokens = pgTable("password_reset_tokens", {
   id:         serial("id").primaryKey(),
   userId:     integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   tokenHash:  text("token_hash").notNull().unique(),
+  codeHash:   text("code_hash"),
   expiresAt:  text("expires_at").notNull(),
   usedAt:     text("used_at"),
   createdAt:  text("created_at").notNull().default(""),
   ip:         text("ip"),
   userAgent:  text("user_agent"),
-});
+}, (t) => ({
+  codeHashIdx: index("prt_code_hash_idx").on(t.codeHash),
+}));
 
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 
