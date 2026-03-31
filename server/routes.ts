@@ -166,10 +166,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const user = await pg.getUserByEmail(email);
       if (!user) return res.json(SAFE_RESPONSE);
 
-      const { randomBytes, createHash } = await import("crypto");
+      const { randomBytes, createHash, randomInt } = await import("crypto");
 
-      // 6-значный OTP-код
-      const rawCode = String(Math.floor(100000 + Math.random() * 900000));
+      // 6-значный OTP-код — crypto.randomInt вместо Math.random() (CSPRNG)
+      const rawCode = String(randomInt(100000, 1000000));
       const codeHash = createHash("sha256").update(rawCode).digest("hex");
 
       // tokenHash — служебное поле (required unique), заполняем рандомным
