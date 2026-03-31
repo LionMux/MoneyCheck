@@ -12,6 +12,37 @@ function createTransport() {
   });
 }
 
+/** Отправляет письмо с 6-значным OTP-кодом для сброса пароля */
+export async function sendPasswordResetCode(to: string, code: string, expiresMinutes = 30) {
+  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "noreply@moneycheck.app";
+  const transporter = createTransport();
+
+  const html = `
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:system-ui,sans-serif;background:#f5f5f5;margin:0;padding:32px 16px">
+  <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+    <h2 style="margin:0 0 8px;color:#111;font-size:22px">Сброс пароля</h2>
+    <p style="color:#555;margin:0 0 24px">MoneyCheck получил запрос на сброс пароля для этого аккаунта. Введите код ниже:</p>
+    <div style="text-align:center;margin:0 0 24px">
+      <span style="display:inline-block;font-size:40px;font-weight:700;letter-spacing:12px;color:#20808D;background:#f0fafa;padding:16px 28px;border-radius:10px;border:2px solid #20808D">${code}</span>
+    </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
+    <p style="color:#aaa;font-size:13px;margin:0">Код действует ${expiresMinutes} минут. Если это были не вы, просто игнорируйте это письмо.</p>
+  </div>
+</body>
+</html>`;
+
+  await transporter.sendMail({
+    from,
+    to,
+    subject: "Ваш код сброса пароля MoneyCheck",
+    html,
+  });
+}
+
+/** Отправляет письмо со ссылкой для сброса пароля (legacy, не используется) */
 export async function sendPasswordResetEmail(to: string, resetUrl: string, expiresMinutes = 30) {
   const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "noreply@moneycheck.app";
   const transporter = createTransport();
