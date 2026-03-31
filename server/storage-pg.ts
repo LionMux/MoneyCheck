@@ -236,22 +236,19 @@ export class PgStorage {
     return updated;
   }
 
-  /** Обновляет хешированный пароль пользователя */
   async updateUserPassword(userId: number, newHashedPassword: string): Promise<void> {
     await db.update(S.users)
       .set({ hashedPassword: newHashedPassword })
       .where(eq(S.users.id, userId));
   }
 
-  /** Update lastLoginAt timestamp when user logs in */
   async touchLastLogin(id: number): Promise<void> {
     await db.update(S.users)
       .set({ lastLoginAt: now() } as any)
       .where(eq(S.users.id, id))
-      .catch(() => {}); // graceful: поле может отсутствовать в старых схемах
+      .catch(() => {});
   }
 
-  /** Returns all users for admin panel (without hashed passwords) */
   async getAllUsers(): Promise<Omit<S.User, "hashedPassword">[]> {
     const rows = await db.select().from(S.users).orderBy(asc(S.users.id));
     return rows.map(({ hashedPassword: _, ...safe }) => safe);
@@ -259,15 +256,18 @@ export class PgStorage {
 
   // ── PASSWORD RESET TOKENS ─────────────────────────────────────────────────
 
-  /** Удаляет все неиспользованные токены пользователя и создаёт новый */
+  /**
+   * Удаляет все неиспользованные токены пользователя и создаёт новый.
+   * Принимает опциональный codeHash для OTP-флоу (6-значный код).
+   */
   async createPasswordResetToken(
     userId: number,
     tokenHash: string,
     expiresAt: string,
     ip?: string,
-    userAgent?: string
+    userAgent?: string,
+    codeHash?: string
   ): Promise<S.PasswordResetToken> {
-    // Инвалидация старых токенов
     await db.delete(S.passwordResetTokens)
       .where(and(
         eq(S.passwordResetTokens.userId, userId),
@@ -276,6 +276,7 @@ export class PgStorage {
     const [token] = await db.insert(S.passwordResetTokens).values({
       userId,
       tokenHash,
+      codeHash: codeHash ?? null,
       expiresAt,
       createdAt: now(),
       ip: ip ?? null,
@@ -284,11 +285,26 @@ export class PgStorage {
     return token;
   }
 
-  /** Находит действующий токен по хешу */
+  /** Находит действующий токен по tokenHash (legacy link-based flow) */
   async findPasswordResetToken(tokenHash: string): Promise<S.PasswordResetToken | null> {
     const [token] = await db.select().from(S.passwordResetTokens)
       .where(and(
         eq(S.passwordResetTokens.tokenHash, tokenHash),
+        eq(S.passwordResetTokens.usedAt, null as any)
+      ))
+      .limit(1);
+    return token ?? null;
+  }
+
+  /** Находит действующий токен по SHA-256 хешу 6-значного OTP кода + userId */
+  async findPasswordResetTokenByCodeHash(
+    userId: number,
+    codeHash: string
+  ): Promise<S.PasswordResetToken | null> {
+    const [token] = await db.select().from(S.passwordResetTokens)
+      .where(and(
+        eq(S.passwordResetTokens.userId, userId),
+        eq(S.passwordResetTokens.codeHash, codeHash),
         eq(S.passwordResetTokens.usedAt, null as any)
       ))
       .limit(1);
@@ -330,13 +346,11 @@ export class PgStorage {
     return updated;
   }
 
-  /** Физически удаляет счёт. Транзакции остаются (accountId станет висячей ссылкой). */
   async deleteAccount(id: number, userId: number): Promise<void> {
     await db.delete(S.accounts)
       .where(and(eq(S.accounts.id, id), eq(S.accounts.userId, userId)));
   }
 
-  /** @deprecated Используй deleteAccount. Оставлено для обратной совместимости. */
   async archiveAccount(id: number, userId: number): Promise<void> {
     await this.deleteAccount(id, userId);
   }
@@ -477,7 +491,6 @@ export class PgStorage {
       .orderBy(asc(S.categories.sortOrder), asc(S.categories.id));
   }
 
-  /** Создаёт новую категорию, автоматически назначая следующий sortOrder. */
   async addCategory(userId: number, data: Omit<S.InsertCategory, "userId">): Promise<S.Category> {
     const rows = await db.select({ maxOrder: sql<number>`coalesce(max(sort_order), -1)` })
       .from(S.categories)
@@ -489,7 +502,6 @@ export class PgStorage {
     return cat;
   }
 
-  /** Обновляет поля категории (name, icon, color). */
   async updateCategory(
     id: number,
     userId: number,
@@ -503,16 +515,11 @@ export class PgStorage {
     return cat;
   }
 
-  /** Удаляет категорию пользователя. Транзакции с этой категорией сохраняются (categoryId → null). */
   async deleteCategory(id: number, userId: number): Promise<void> {
     await db.delete(S.categories)
       .where(and(eq(S.categories.id, id), eq(S.categories.userId, userId)));
   }
 
-  /**
-   * Переставляет порядок категорий одного типа.
-   * @param newOrder — массив id категорий в новом порядке (от первого к последнему).
-   */
   async reorderCategories(
     userId: number,
     type: "income" | "expense",
