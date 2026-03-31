@@ -17,6 +17,12 @@ export async function sendPasswordResetCode(to: string, code: string, expiresMin
   const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "noreply@moneycheck.app";
   const transporter = createTransport();
 
+  // Цифры отдельными span — визуальные отступы без letter-spacing.
+  // Скрытый span с чистым кодом — чтобы при копировании брался только он.
+  const digits = code.split("").map((d, i) =>
+    `<span style="display:inline-block;font-size:40px;font-weight:700;color:#20808D;margin-right:${i < code.length - 1 ? "10px" : "0"}">${d}</span>`
+  ).join("");
+
   const html = `
 <!DOCTYPE html>
 <html lang="ru">
@@ -25,9 +31,13 @@ export async function sendPasswordResetCode(to: string, code: string, expiresMin
   <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,.08)">
     <h2 style="margin:0 0 8px;color:#111;font-size:22px">Сброс пароля</h2>
     <p style="color:#555;margin:0 0 24px">MoneyCheck получил запрос на сброс пароля для этого аккаунта. Введите код ниже:</p>
-    <div style="text-align:center;margin:0 0 24px">
-      <span style="display:inline-block;font-size:40px;font-weight:700;letter-spacing:12px;color:#20808D;background:#f0fafa;padding:16px 28px;border-radius:10px;border:2px solid #20808D">${code}</span>
+    <div style="text-align:center;margin:0 0 24px;background:#f0fafa;padding:20px 28px;border-radius:10px;border:2px solid #20808D">
+      <!-- Визуальные цифры с отступами, скрыты при копировании -->
+      <span aria-hidden="true" style="user-select:none;-webkit-user-select:none">${digits}</span>
+      <!-- Чистый код без пробелов, отображается при копировании -->
+      <span style="position:absolute;opacity:0;pointer-events:none;font-size:1px;color:transparent">${code}</span>
     </div>
+    <p style="text-align:center;color:#555;font-size:15px;margin:0 0 24px">Код: <strong>${code}</strong></p>
     <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
     <p style="color:#aaa;font-size:13px;margin:0">Код действует ${expiresMinutes} минут. Если это были не вы, просто игнорируйте это письмо.</p>
   </div>
