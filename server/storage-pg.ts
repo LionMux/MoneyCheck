@@ -670,6 +670,18 @@ export class PgStorage {
     return rows.map(({ token: _token, ...rest }) => rest);
   }
 
+  /** Возвращает полную запись PAT включая token — только для /api/pat/login */
+  async getPersonalAccessTokenById(id: number, userId: number): Promise<S.PersonalAccessToken | null> {
+    const [pat] = await db.select().from(S.personalAccessTokens)
+      .where(and(
+        eq(S.personalAccessTokens.id, id),
+        eq(S.personalAccessTokens.userId, userId),
+        isNull(S.personalAccessTokens.revokedAt)
+      ))
+      .limit(1);
+    return pat ?? null;
+  }
+
   async revokePersonalAccessToken(id: number, userId: number): Promise<void> {
     await db.update(S.personalAccessTokens)
       .set({ revokedAt: now() })
