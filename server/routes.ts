@@ -50,14 +50,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   const cookieParser = (await import("cookie-parser")).default;
   app.use(cookieParser());
 
-  // ── RATE LIMITERS ─────────────────────────────────────────────────────────
-  // OWASP Forgot Password Cheat Sheet: limit requests to prevent email enumeration
+  // ── RATE LIMITERS ──────────────────────────────────────────────────────
   const { rateLimit } = await import("express-rate-limit");
 
   const forgotPasswordLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5,                   // max 5 requests per IP per window
-    skipSuccessfulRequests: true, // successful requests don't count toward limit
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Слишком много запросов. Попробуйте через 15 минут." },
@@ -79,17 +78,17 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     startScheduler(pg);
   }
 
-  // ── iOS SHORTCUTS ─────────────────────────────────────────────────────────
+  // ── iOS SHORTCUTS ─────────────────────────────────────────────────────
   app.use("/api/ios", iosShortcutsRouter);
 
-  // ── AUTH ──────────────────────────────────────────────────────────────────
+  // ── AUTH ────────────────────────────────────────────────────────────────
 
   app.post("/api/auth/register", async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured. Auth requires PostgreSQL." });
     const { email, name, password } = z.object({
       email: z.string().email(),
       name: z.string().min(1).max(100),
-      password: z.string().min(8),
+      password: z.string().min(6),
     }).parse(req.body);
     const existing = await pg.getUserByEmail(email);
     if (existing) return res.status(409).json({ error: "Email уже зарегистрирован" });
@@ -109,7 +108,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (!user) return res.status(401).json({ error: "Неверный email или пароль" });
     const valid = await verifyPassword(password, user.hashedPassword);
     if (!valid) return res.status(401).json({ error: "Неверный email или пароль" });
-    // Update last login timestamp (non-blocking)
     pg.touchLastLogin(user.id).catch(() => {});
     const token = signJwt(user.id);
     setCookieToken(res, token);
@@ -151,15 +149,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(safe);
   });
 
-  // ── FORGOT PASSWORD ───────────────────────────────────────────────────────
-  // OWASP: always return the same response regardless of whether email exists,
-  // to prevent user enumeration. Rate limited: 5 req / 15 min per IP.
+  // ── FORGOT PASSWORD (Step 1) ──────────────────────────────────────────
+  // Генерирует 6-значный OTP-код, хранит SHA-256 хеш в БД, отправляет письмо.
+  // Пароль НЕ меняется до шага 3.
 
   app.post("/api/auth/forgot-password", forgotPasswordLimiter, async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured" });
 
-    // Always respond with success to prevent email enumeration (OWASP)
-    const SAFE_RESPONSE = { ok: true, message: "Если аккаунт существует, мы отправили письмо со ссылкой для сброса пароля." };
+    const SAFE_RESPONSE = { ok: true, message: "Если аккаунт существует, мы отправили код на вашу почту." };
 
     try {
       const { email } = z.object({
@@ -167,43 +164,79 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       }).parse(req.body);
 
       const user = await pg.getUserByEmail(email);
-      if (!user) return res.json(SAFE_RESPONSE); // don't reveal non-existence
+      if (!user) return res.json(SAFE_RESPONSE);
 
       const { randomBytes, createHash } = await import("crypto");
-      const rawToken = randomBytes(32).toString("hex"); // 256 bits entropy (OWASP: min 128 bits)
-      const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes
 
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ?? req.socket.remoteAddress ?? null;
-      const userAgent = req.headers["user-agent"] ?? null;
+      // 6-значный OTP-код
+      const rawCode = String(Math.floor(100000 + Math.random() * 900000));
+      const codeHash = createHash("sha256").update(rawCode).digest("hex");
 
-      await pg.createPasswordResetToken(user.id, tokenHash, expiresAt, ip ?? undefined, userAgent ?? undefined);
+      // tokenHash — служебное поле (required unique), заполняем рандомным
+      const tokenHash = createHash("sha256").update(randomBytes(32)).digest("hex");
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-      const appUrl = (process.env.APP_URL ?? "http://localhost:5000").replace(/\/$/, "");
-      const resetUrl = `${appUrl}/#/reset-password?token=${rawToken}`;
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ?? req.socket.remoteAddress ?? undefined;
+      const userAgent = req.headers["user-agent"] ?? undefined;
 
-      const { sendPasswordResetEmail } = await import("./email");
-      await sendPasswordResetEmail(user.email, resetUrl, 30);
+      await pg.createPasswordResetToken(user.id, tokenHash, expiresAt, ip, userAgent, codeHash);
+
+      const { sendPasswordResetCode } = await import("./email");
+      await sendPasswordResetCode(user.email, rawCode, 30);
 
       return res.json(SAFE_RESPONSE);
     } catch (e: any) {
-      // Still return safe response — don't leak internal errors
       console.error("[forgot-password] Error:", e.message);
       return res.json(SAFE_RESPONSE);
     }
   });
 
-  // ── RESET PASSWORD ────────────────────────────────────────────────────────
-  // OWASP: verify token hash, check expiry & used_at, hash new password,
-  // mark token used, invalidate all old sessions, notify user by email.
+  // ── VERIFY RESET CODE (Step 2) ───────────────────────────────────────
+  // Проверяет код — пароль НЕ меняется. Возвращает { valid: true } если код верен.
+
+  app.post("/api/auth/verify-reset-code", resetPasswordLimiter, async (req, res) => {
+    if (!pg) return res.status(503).json({ error: "Database not configured" });
+
+    try {
+      const { email, code } = z.object({
+        email: z.string().email(),
+        code:  z.string().length(6),
+      }).parse(req.body);
+
+      const user = await pg.getUserByEmail(email);
+      if (!user) return res.status(400).json({ error: "Неверный код" });
+
+      const { createHash } = await import("crypto");
+      const codeHash = createHash("sha256").update(code).digest("hex");
+
+      const resetToken = await pg.findPasswordResetTokenByCodeHash(user.id, codeHash);
+      if (!resetToken) return res.status(400).json({ error: "Неверный код" });
+
+      if (new Date() > new Date(resetToken.expiresAt)) {
+        return res.status(400).json({ error: "Код истёк. Запросите новый." });
+      }
+
+      return res.json({ valid: true });
+    } catch (e: any) {
+      if (e.name === "ZodError") {
+        return res.status(400).json({ error: "Неверный код" });
+      }
+      console.error("[verify-reset-code] Error:", e.message);
+      return res.status(500).json({ error: "Внутренняя ошибка сервера" });
+    }
+  });
+
+  // ── RESET PASSWORD (Step 3) ─────────────────────────────────────────
+  // Повторно проверяет код + меняет пароль в БД. Только здесь пароль меняется.
 
   app.post("/api/auth/reset-password", resetPasswordLimiter, async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured" });
 
     try {
-      const { token, newPassword, confirmPassword } = z.object({
-        token:           z.string().min(1),
-        newPassword:     z.string().min(8, "Пароль должен содержать минимум 8 символов"),
+      const { email, code, newPassword, confirmPassword } = z.object({
+        email:           z.string().email(),
+        code:            z.string().length(6),
+        newPassword:     z.string().min(6, "Пароль должен содержать минимум 6 символов"),
         confirmPassword: z.string().min(1),
       }).parse(req.body);
 
@@ -211,32 +244,26 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(400).json({ error: "Пароли не совпадают" });
       }
 
-      const { createHash } = await import("crypto");
-      const tokenHash = createHash("sha256").update(token).digest("hex");
+      const user = await pg.getUserByEmail(email);
+      if (!user) return res.status(400).json({ error: "Неверный код" });
 
-      const resetToken = await pg.findPasswordResetToken(tokenHash);
-      if (!resetToken) {
-        return res.status(400).json({ error: "Ссылка недействительна или уже была использована" });
-      }
+      const { createHash } = await import("crypto");
+      const codeHash = createHash("sha256").update(code).digest("hex");
+
+      const resetToken = await pg.findPasswordResetTokenByCodeHash(user.id, codeHash);
+      if (!resetToken) return res.status(400).json({ error: "Неверный код" });
 
       if (new Date() > new Date(resetToken.expiresAt)) {
-        return res.status(400).json({ error: "Ссылка истекла. Запросите новую." });
+        return res.status(400).json({ error: "Код истёк. Запросите новый." });
       }
 
-      // Hash new password and update user
       const newHashedPassword = await hashPassword(newPassword);
       await pg.updateUserPassword(resetToken.userId, newHashedPassword);
-
-      // Mark token as used (one-time use)
       await pg.consumePasswordResetToken(resetToken.id);
 
-      // Notify user that password was changed (OWASP recommendation)
       try {
-        const user = await pg.getUserById(resetToken.userId);
-        if (user) {
-          const { sendPasswordChangedEmail } = await import("./email");
-          await sendPasswordChangedEmail(user.email);
-        }
+        const { sendPasswordChangedEmail } = await import("./email");
+        await sendPasswordChangedEmail(user.email);
       } catch (mailErr: any) {
         console.warn("[reset-password] Failed to send notification email:", mailErr.message);
       }
@@ -253,9 +280,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   const guard = pg ? patOrJwtMiddleware : (_req: any, _res: any, next: any) => next();
 
-  // ── ADMIN ─────────────────────────────────────────────────────────────────
-  // Простой guard: только userId === 1 считается администратором.
-  // Для будущего расширения достаточно добавить поле isAdmin в таблицу users.
+  // ── ADMIN ───────────────────────────────────────────────────────────────
 
   app.get("/api/admin/users", authMiddleware, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
@@ -268,7 +293,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ── PERSONAL ACCESS TOKENS (PAT) ─────────────────────────────────────────
+  // ── PERSONAL ACCESS TOKENS (PAT) ───────────────────────────────────────
 
   app.get("/api/pat", authMiddleware, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
@@ -322,7 +347,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ── ACCOUNTS ──────────────────────────────────────────────────────────────
+  // ── ACCOUNTS ─────────────────────────────────────────────────────────────
 
   app.get("/api/accounts", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.json([]);
@@ -447,7 +472,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ── TRANSACTIONS ──────────────────────────────────────────────────────────
+  // ── TRANSACTIONS ─────────────────────────────────────────────────────────
 
   app.get("/api/transactions", guard, async (req: AuthRequest, res) => {
     if (pg) return res.json(await pg.getTransactions(getUserId(req)));
@@ -704,7 +729,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true, type: req.query.type ?? "expense" });
   });
 
-  // ── WIDGET SUMMARY ────────────────────────────────────────────────────────
+  // ── WIDGET SUMMARY ─────────────────────────────────────────────────────────
 
   app.get("/api/widget/summary", async (req: AuthRequest, res) => {
     if (!pg) {
@@ -764,7 +789,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ── WIDGET AUTH ──────────────────────────────────────────────────────────
+  // ── WIDGET AUTH ─────────────────────────────────────────────────────────
 
   app.post("/api/widget/auth/issue", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
