@@ -56,6 +56,7 @@ export type InsertPersonalAccessToken = typeof personalAccessTokens.$inferInsert
 // ─── PASSWORD RESET TOKENS ──────────────────────────────────────────────────
 // tokenHash — SHA-256 of the raw hex token (legacy link-based flow, kept for compatibility)
 // codeHash  — SHA-256 of the 6-digit OTP code (new flow)
+// attempts  — number of failed verify attempts; token is invalidated after 10
 
 export const passwordResetTokens = pgTable("password_reset_tokens", {
   id:         serial("id").primaryKey(),
@@ -64,6 +65,7 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   codeHash:   text("code_hash"),
   expiresAt:  text("expires_at").notNull(),
   usedAt:     text("used_at"),
+  attempts:   integer("attempts").notNull().default(0),
   createdAt:  text("created_at").notNull().default(""),
   ip:         text("ip"),
   userAgent:  text("user_agent"),
