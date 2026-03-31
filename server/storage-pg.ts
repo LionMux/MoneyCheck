@@ -4,7 +4,7 @@
  * plus extended methods for users, accounts, notifications, etc.
  */
 
-import { eq, and, desc, sql, asc } from "drizzle-orm";
+import { eq, and, desc, sql, asc, isNull } from "drizzle-orm";
 import { db } from "./db";
 import * as S from "@shared/schema";
 import { format } from "date-fns";
@@ -271,7 +271,7 @@ export class PgStorage {
     await db.delete(S.passwordResetTokens)
       .where(and(
         eq(S.passwordResetTokens.userId, userId),
-        eq(S.passwordResetTokens.usedAt, null as any)
+        isNull(S.passwordResetTokens.usedAt)
       ));
     const [token] = await db.insert(S.passwordResetTokens).values({
       userId,
@@ -290,7 +290,7 @@ export class PgStorage {
     const [token] = await db.select().from(S.passwordResetTokens)
       .where(and(
         eq(S.passwordResetTokens.tokenHash, tokenHash),
-        eq(S.passwordResetTokens.usedAt, null as any)
+        isNull(S.passwordResetTokens.usedAt)
       ))
       .limit(1);
     return token ?? null;
@@ -305,7 +305,7 @@ export class PgStorage {
       .where(and(
         eq(S.passwordResetTokens.userId, userId),
         eq(S.passwordResetTokens.codeHash, codeHash),
-        eq(S.passwordResetTokens.usedAt, null as any)
+        isNull(S.passwordResetTokens.usedAt)
       ))
       .limit(1);
     return token ?? null;
@@ -664,7 +664,7 @@ export class PgStorage {
     const rows = await db.select().from(S.personalAccessTokens)
       .where(and(
         eq(S.personalAccessTokens.userId, userId),
-        eq(S.personalAccessTokens.revokedAt, null as any)
+        isNull(S.personalAccessTokens.revokedAt)
       ))
       .orderBy(desc(S.personalAccessTokens.createdAt));
     return rows.map(({ token: _token, ...rest }) => rest);
