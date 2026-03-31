@@ -18,7 +18,6 @@ import NotFound from "@/pages/not-found";
 import WidgetAuthPage from "@/pages/WidgetAuth";
 import AdminUsersPage from "@/pages/AdminUsers";
 import ForgotPasswordPage from "@/pages/ForgotPassword";
-import ResetPasswordPage from "@/pages/ResetPassword";
 
 function SwitchingSpinner() {
   return (
@@ -39,7 +38,6 @@ function AppRouter() {
       {/* ── Публичные роуты — без auth guard и Layout ── */}
       <Route path="/widget-auth"       component={WidgetAuthPage} />
       <Route path="/forgot-password"   component={ForgotPasswordPage} />
-      <Route path="/reset-password"    component={ResetPasswordPage} />
 
       {/* ── Остальные роуты — требуют авторизации ── */}
       <Route>
