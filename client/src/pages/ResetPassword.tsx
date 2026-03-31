@@ -5,7 +5,6 @@
  */
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,8 +54,9 @@ function PasswordInput({
 function StrengthBar({ password }: { password: string }) {
   const score = (() => {
     if (!password) return 0;
-    let s = 0;
-    if (password.length >= 8)  s++;
+    // Hard gate: anything under 8 chars is always score 1 ("Very weak")
+    if (password.length < 8) return 1;
+    let s = 1; // base: at least 8 chars
     if (password.length >= 12) s++;
     if (/[A-Z]/.test(password) && /[a-z]/.test(password)) s++;
     if (/[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password)) s++;
@@ -91,7 +91,6 @@ function StrengthBar({ password }: { password: string }) {
 }
 
 export default function ResetPasswordPage() {
-  const { toast } = useToast();
   const [location] = useLocation();
 
   // Extract token from query string (?token=xxx) in hash routing
@@ -103,7 +102,9 @@ export default function ResetPasswordPage() {
   const [done, setDone]                       = useState(false);
   const [error, setError]                     = useState<string | null>(null);
 
-  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const mismatch       = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const tooShort       = newPassword.length > 0 && newPassword.length < 8;
+  const submitDisabled = loading || !token || mismatch || newPassword.length < 8;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,9 +179,7 @@ export default function ResetPasswordPage() {
                   <ShieldCheck size={24} className="text-emerald-400" />
                 </div>
                 <CardTitle className="tracking-tight">Пароль изменён</CardTitle>
-                <CardDescription>
-                  Теперь вы можете войти с новым паролем
-                </CardDescription>
+                <CardDescription>Теперь вы можете войти с новым паролем</CardDescription>
               </>
             )}
           </CardHeader>
@@ -215,6 +214,9 @@ export default function ResetPasswordPage() {
                     testId="input-new-password"
                   />
                   <StrengthBar password={newPassword} />
+                  {tooShort && (
+                    <p className="text-[11px] text-destructive mt-1">Минимум 8 символов</p>
+                  )}
                 </div>
 
                 <div className="space-y-1.5">
@@ -234,7 +236,7 @@ export default function ResetPasswordPage() {
                 <Button
                   type="submit"
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-900/30 transition-all duration-150"
-                  disabled={loading || !token || mismatch}
+                  disabled={submitDisabled}
                   data-testid="btn-reset-submit"
                 >
                   {loading
@@ -245,9 +247,7 @@ export default function ResetPasswordPage() {
               </form>
             ) : (
               <Link href="/">
-                <Button
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-900/30 transition-all duration-150"
-                >
+                <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-900/30 transition-all duration-150">
                   Перейти ко входу
                 </Button>
               </Link>
@@ -255,7 +255,6 @@ export default function ResetPasswordPage() {
           </CardContent>
         </Card>
 
-        {/* Back link — only shown before success */}
         {!done && (
           <div className="text-center">
             <Link
