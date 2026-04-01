@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Account } from "@shared/schema";
 import { cn } from "@/lib/utils";
 import { CreditCard, Check, X, Wallet } from "lucide-react";
+import { useDisplayPreferences } from "@/contexts/DisplayPreferencesContext";
 
 interface CardFilterBarProps {
   accounts: Account[];
@@ -23,9 +23,7 @@ export function CardFilterBar({
   selectedAccountIds,
   onSelectionChange,
 }: CardFilterBarProps) {
-  const [showBalance] = useState(() => {
-    try { return localStorage.getItem("txShowBalance") === "1"; } catch { return false; }
-  });
+  const { showBalance } = useDisplayPreferences();
 
   if (accounts.length === 0) return null;
 
@@ -69,6 +67,8 @@ export function CardFilterBar({
       <div className="flex flex-wrap gap-2">
         {accounts.map((acc) => {
           const selected = selectedAccountIds.has(acc.id);
+          // Prefer currentBalance if available (computed server-side), fall back to initialBalance
+          const balance = (acc as any).currentBalance ?? acc.initialBalance ?? 0;
           return (
             <motion.button
               key={acc.id}
@@ -90,7 +90,7 @@ export function CardFilterBar({
 
               <span className="truncate max-w-[120px]">{acc.name}</span>
 
-              {/* Balance badge — shown when toggle is on in Settings */}
+              {/* Balance badge — reactive via context */}
               {showBalance && (
                 <span className={cn(
                   "text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-full leading-none flex-shrink-0",
@@ -98,7 +98,7 @@ export function CardFilterBar({
                     ? "bg-primary/15 text-primary"
                     : "bg-muted-foreground/10 text-muted-foreground",
                 )}>
-                  {fmt(acc.initialBalance ?? 0)}
+                  {fmt(balance)}
                 </span>
               )}
 
