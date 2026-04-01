@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, ChevronDown, ArrowLeftRight, MoveRight } from "lucide-react";
+import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, ChevronDown, ArrowLeftRight, MoveRight, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -42,26 +42,86 @@ function resolveType(formType: "income" | "expense", account?: Account): string 
   return formType === "expense" ? "creditPurchase" : "creditPayment";
 }
 
-// ── Строка транзакции ────────────────────────────────────────────
+/**
+ * Parses the transfer title created by the backend:
+ * "Перевод: Сбербанк → Тинькофф"  →  { from: "Сбербанк", to: "Тинькофф" }
+ * Falls back gracefully if the format doesn't match.
+ */
+function parseTransferTitle(title: string): { from: string; to: string } | null {
+  const match = title.match(/^Перевод:\s*(.+?)\s*→\s*(.+)$/);
+  if (!match) return null;
+  return { from: match[1].trim(), to: match[2].trim() };
+}
+
+// ── Строка перевода ──────────────────────────────────────────────
+function TransferRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
+  const parsed = parseTransferTitle(tx.title);
+
+  return (
+    <div
+      data-testid={`transaction-item-${tx.id}`}
+      className="px-4 py-3 hover:bg-muted/40 transition-colors group"
+    >
+      <div className="flex items-center gap-3">
+        {/* Icon */}
+        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+          <ArrowLeftRight size={14} className="text-blue-500" />
+        </div>
+
+        {/* Label */}
+        <div className="flex-1 min-w-0">
+          {parsed ? (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-sm font-medium text-foreground truncate max-w-[7rem]">{parsed.from}</span>
+              <ArrowRight size={12} className="text-blue-400 flex-shrink-0" />
+              <span className="text-sm font-medium text-foreground truncate max-w-[7rem]">{parsed.to}</span>
+            </div>
+          ) : (
+            <p className="text-sm font-medium truncate">{tx.title}</p>
+          )}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300">
+              Перевод
+            </Badge>
+            {tx.note && (
+              <span className="text-xs text-muted-foreground truncate max-w-[12rem]">{tx.note}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Amount + delete */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <span className="text-sm font-semibold tabular-nums text-blue-500">
+            {fmt(tx.amount)}
+          </span>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            data-testid={`btn-delete-transaction-${tx.id}`}
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-0.5"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Строка обычной транзакции ────────────────────────────────────
 function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[]; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
-  const isIncome   = tx.type === "income";
-  const isTransfer = tx.type === "transfer" || tx.type === "creditPayment";
-  const isExpense  = tx.type === "expense" || tx.type === "creditPurchase";
+  const isIncome  = tx.type === "income";
+  const isExpense = tx.type === "expense" || tx.type === "creditPurchase";
 
-  const amountColor = isIncome ? "text-income" : isTransfer ? "text-blue-500" : "text-expense";
+  const amountColor = isIncome ? "text-income" : "text-expense";
   const iconBg      = isIncome
     ? "bg-emerald-100 dark:bg-emerald-900/30"
-    : isTransfer
-    ? "bg-blue-100 dark:bg-blue-900/30"
     : "bg-red-100 dark:bg-red-900/30";
   const icon = isIncome
     ? <TrendingUp size={14} className="text-income" />
-    : isTransfer
-    ? <ArrowLeftRight size={14} className="text-blue-500" />
     : <TrendingDown size={14} className="text-expense" />;
-  const prefix = isIncome || (isTransfer && tx.amount > 0) ? "+" : "−";
+  const prefix = isIncome ? "+" : "−";
 
   const txAccount = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
   const isTruncated = tx.title.length > 28;
@@ -90,13 +150,7 @@ function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[
             )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-            {tx.type === "transfer" ? (
-              <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300">
-                Перевод
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
-            )}
+            <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
             {txAccount && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: txAccount.color ?? "#20808D" }} />
@@ -171,16 +225,13 @@ export default function Transactions() {
   const [filter, setFilter]   = useState<FilterType>("all");
   const [mode, setMode]       = useState<FormMode>("expense");
 
-  // Новое: фильтр по счетам — пустой Set = все счета
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
 
-  // Форма обычной операции
   const [form, setForm] = useState<Partial<InsertTransaction> & { accountId?: number }>({
     type: "expense",
     date: format(new Date(), "yyyy-MM-dd"),
   });
 
-  // Форма перевода
   const [transfer, setTransfer] = useState<{
     fromAccountId?: number;
     toAccountId?: number;
@@ -234,21 +285,19 @@ export default function Transactions() {
     },
   });
 
-  // ── Фильтрация: тип + счёт ──────────────────────────────────────
-const filtered = useMemo(() => {
+  // ── Фильтрация ──────────────────────────────────────────────────
+  const filtered = useMemo(() => {
     let list = transactions;
 
-    // Фильтр по типу
     if (filter !== "all") {
       list = list.filter(t => {
         if (filter === "income")   return t.type === "income";
         if (filter === "expense")  return t.type === "expense" || t.type === "creditPurchase";
-        if (filter === "transfer") return t.type === "transfer" || t.type === "creditPayment";
+        if (filter === "transfer") return t.type === "transfer";
         return true;
       });
     }
 
-    // Фильтр по счётам (если выбран хотя бы один)
     if (selectedAccountIds.size > 0) {
       list = list.filter(t => t.accountId != null && selectedAccountIds.has(t.accountId));
     }
@@ -256,10 +305,8 @@ const filtered = useMemo(() => {
     return list;
   }, [transactions, filter, selectedAccountIds]);
 
-  // Группировка по датам
   const groups = useMemo(() => groupByDate(filtered), [filtered]);
 
-  // Итоги
   const totalIncome  = transactions.filter(t => t.type === "income").reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalExpense = transactions.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
 
@@ -307,6 +354,27 @@ const filtered = useMemo(() => {
   const fromAcc = activeAccounts.find(a => a.id === transfer.fromAccountId);
   const toAcc   = activeAccounts.find(a => a.id === transfer.toAccountId);
 
+  // Row renderer — routes transfer type to TransferRow, rest to TxRow
+  const renderRow = (tx: Transaction) => {
+    if (tx.type === "transfer") {
+      return (
+        <TransferRow
+          key={tx.id}
+          tx={tx}
+          onDelete={() => deleteMut.mutate(tx.id)}
+        />
+      );
+    }
+    return (
+      <TxRow
+        key={tx.id}
+        tx={tx}
+        accounts={activeAccounts}
+        onDelete={() => deleteMut.mutate(tx.id)}
+      />
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -319,7 +387,7 @@ const filtered = useMemo(() => {
         </Button>
       </div>
 
-      {/* ── Фильтры: тип + карты ── */}
+      {/* Фильтры */}
       <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar" data-testid="filter-tabs">
         {FILTERS.map(f => (
           <button
@@ -335,7 +403,6 @@ const filtered = useMemo(() => {
           </button>
         ))}
 
-        {/* ── Фильтр по счётам (новое) ── */}
         {activeAccounts.length > 0 && (
           <CardFilterBar
             accounts={activeAccounts}
@@ -367,7 +434,7 @@ const filtered = useMemo(() => {
         </Card>
       </div>
 
-      {/* ── Список, сгруппированный по датам ── */}
+      {/* Список */}
       <Card>
         <CardContent className="p-0 overflow-hidden">
           <AnimatePresence mode="wait">
@@ -394,14 +461,7 @@ const filtered = useMemo(() => {
                     key={group.dateKey}
                     group={group}
                     index={i}
-                    renderRow={tx => (
-                      <TxRow
-                        key={tx.id}
-                        tx={tx}
-                        accounts={activeAccounts}
-                        onDelete={() => deleteMut.mutate(tx.id)}
-                      />
-                    )}
+                    renderRow={renderRow}
                   />
                 ))}
               </motion.div>
@@ -420,7 +480,6 @@ const filtered = useMemo(() => {
           </DialogHeader>
 
           <div className="space-y-3">
-            {/* Переключатель режима */}
             <div className="grid grid-cols-3 gap-1.5 p-1 bg-muted rounded-xl">
               {([
                 { v: "expense"  as FormMode, label: "Расход",  activeClass: "bg-red-50 border-red-300 text-red-700 dark:bg-red-900/20 dark:text-red-400" },
@@ -441,7 +500,6 @@ const filtered = useMemo(() => {
               ))}
             </div>
 
-            {/* ── Форма перевода ──────────────────────────────────── */}
             {mode === "transfer" ? (
               <>
                 {activeAccounts.length < 2 ? (
@@ -515,7 +573,6 @@ const filtered = useMemo(() => {
                 )}
               </>
             ) : (
-              /* ── Форма обычной операции ──────────────────── */
               <>
                 {activeAccounts.length > 0 && (
                   <div>

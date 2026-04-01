@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { format, isToday, isYesterday } from "date-fns";
 import { ru } from "date-fns/locale";
-import type { Transaction, Account } from "@shared/schema";
+import type { Transaction } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
 function formatDayLabel(dateStr: string): string {
@@ -36,17 +36,43 @@ function fmt(n: number) {
   }).format(Math.abs(n));
 }
 
-interface DateGroup {
-  dateKey: string; // "2026-03-31"
+export interface DateGroup {
+  dateKey: string;
+  /** Deduplicated list: transfer pairs are collapsed to a single outgoing tx */
   transactions: Transaction[];
 }
 
-/** Groups a flat list of transactions by date ("yyyy-MM-dd") and sorts newest first. */
+/**
+ * Groups transactions by date and deduplicates transfer pairs.
+ *
+ * The backend creates two `transfer` rows per operation and links them via
+ * `linkedTransactionId`.  We only keep the **outgoing** leg (amount < 0)
+ * and silently drop the mirror incoming leg.  This means the list shows one
+ * row per transfer instead of two.
+ *
+ * Grouping is by `tx.date` (first 10 chars), sorted newest-first.
+ */
 export function groupByDate(transactions: Transaction[]): DateGroup[] {
+  // Collect IDs of incoming-leg transfers so we can skip them
+  const incomingTransferIds = new Set<number>();
+
+  for (const tx of transactions) {
+    if (tx.type === "transfer" && tx.linkedTransactionId != null) {
+      // outgoing leg: amount < 0.  Its linkedTransactionId points to the
+      // incoming leg.  Mark that incoming leg for exclusion.
+      if (tx.amount < 0) {
+        incomingTransferIds.add(tx.linkedTransactionId);
+      }
+    }
+  }
+
   const map = new Map<string, Transaction[]>();
 
   for (const tx of transactions) {
-    const key = tx.date.slice(0, 10); // "2026-03-31T...".slice(0,10)
+    // Skip the incoming half of transfer pairs
+    if (incomingTransferIds.has(tx.id)) continue;
+
+    const key = String(tx.date).slice(0, 10);
     const arr = map.get(key) ?? [];
     arr.push(tx);
     map.set(key, arr);
@@ -59,9 +85,7 @@ export function groupByDate(transactions: Transaction[]): DateGroup[] {
 
 interface TransactionDateGroupProps {
   group: DateGroup;
-  /** Render each transaction row — keep parent in control of row UI */
   renderRow: (tx: Transaction) => React.ReactNode;
-  /** Index of the group (for stagger animation) */
   index?: number;
 }
 
@@ -70,15 +94,15 @@ export function TransactionDateGroup({
   renderRow,
   index = 0,
 }: TransactionDateGroupProps) {
-  const dayLabel  = formatDayLabel(group.dateKey);
-  const weekday   = formatWeekday(group.dateKey);
+  const dayLabel = formatDayLabel(group.dateKey);
+  const weekday  = formatWeekday(group.dateKey);
 
   const { totalIncome, totalExpense } = useMemo(() => {
     let income = 0;
     let expense = 0;
     for (const tx of group.transactions) {
-      if (tx.type === "income")                                   income  += Math.abs(tx.amount);
-      if (tx.type === "expense" || tx.type === "creditPurchase") expense += Math.abs(tx.amount);
+      if (tx.type === "income")                                    income  += Math.abs(tx.amount);
+      if (tx.type === "expense" || tx.type === "creditPurchase")  expense += Math.abs(tx.amount);
     }
     return { totalIncome: income, totalExpense: expense };
   }, [group.transactions]);
@@ -94,7 +118,7 @@ export function TransactionDateGroup({
         damping: 30,
       }}
     >
-      {/* ── Date header ───────────────────────────────────────── */}
+      {/* Date header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 sticky top-0 z-10 bg-background/90 backdrop-blur-sm">
         <div>
           <span className="text-sm font-semibold text-foreground">{dayLabel}</span>
@@ -110,7 +134,7 @@ export function TransactionDateGroup({
         </div>
       </div>
 
-      {/* ── Transaction rows ────────────────────────────────────── */}
+      {/* Rows */}
       <div className={cn("divide-y divide-border")}>
         {group.transactions.map((tx, i) => (
           <motion.div
