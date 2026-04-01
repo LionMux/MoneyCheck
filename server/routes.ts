@@ -613,6 +613,42 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  /**
+   * PATCH /api/transactions/:id
+   * Partial update — currently supports changing `date` (drag-and-drop redate).
+   * For transfer transactions both legs are updated atomically.
+   */
+  app.patch("/api/transactions/:id", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    const userId  = getUserId(req);
+    const txId    = z.coerce.number().parse(req.params.id);
+    try {
+      const data = z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD").optional(),
+      }).parse(req.body);
+
+      if (!Object.keys(data).length) {
+        return res.status(400).json({ error: "Nothing to update" });
+      }
+
+      const allTxs = await pg.getTransactions(userId);
+      const tx = allTxs.find(t => t.id === txId);
+      if (!tx) return res.status(404).json({ error: "Транзакция не найдена" });
+
+      const updated = await pg.updateTransaction(txId, userId, data);
+
+      // For transfers: keep both legs in sync
+      if (tx.type === "transfer" && tx.linkedTransactionId && data.date) {
+        await pg.updateTransaction(tx.linkedTransactionId, userId, { date: data.date }).catch(() => {});
+      }
+
+      res.json(updated);
+    } catch (e: any) {
+      if (e.name === "ZodError") return res.status(400).json({ error: e.errors?.[0]?.message });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── BUDGETS ───────────────────────────────────────────────────────────────
 
   app.get("/api/budgets", guard, async (req: AuthRequest, res) => {
