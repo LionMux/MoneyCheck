@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Transaction, InsertTransaction, Account } from "@shared/schema";
@@ -9,11 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, ChevronDown, ArrowLeftRight, MoveRight } from "lucide-react";
+import { Trash2, Plus, TrendingUp, TrendingDown, CreditCard, ChevronDown, ArrowLeftRight, MoveRight, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
+import { AnimatePresence, motion } from "framer-motion";
+import { CardFilterBar } from "@/components/CardFilterBar";
+import { TransactionDateGroup, groupByDate } from "@/components/TransactionDateGroup";
 
 interface Category { id: number; name: string; type: string; }
 
@@ -39,28 +42,99 @@ function resolveType(formType: "income" | "expense", account?: Account): string 
   return formType === "expense" ? "creditPurchase" : "creditPayment";
 }
 
-// ── Строка транзакции ────────────────────────────────────────────────────
+/**
+ * Parses the transfer title written by the backend:
+ *   "Перевод: Сбербанк \u2192 Тинькофф"
+ * Returns { from, to } or null if format doesn't match.
+ */
+function parseTransferTitle(title: string): { from: string; to: string } | null {
+  const ARROW   = "\u2192";         // →  U+2192 RIGHTWARDS ARROW
+  const SEP     = ` ${ARROW} `;    // " → "
+  const PREFIX  = "Перевод: ";
+  if (!title.startsWith(PREFIX)) return null;
+  const rest = title.slice(PREFIX.length);
+  const idx  = rest.indexOf(SEP);
+  if (idx === -1) return null;
+  return {
+    from: rest.slice(0, idx).trim(),
+    to:   rest.slice(idx + SEP.length).trim(),  // explicit SEP.length, not magic 3
+  };
+}
+
+// ── Строка перевода ──────────────────────────────────────────────
+function TransferRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }) {
+  const parsed = parseTransferTitle(tx.title);
+
+  return (
+    <div
+      data-testid={`transaction-item-${tx.id}`}
+      className="px-4 py-3 hover:bg-muted/40 transition-colors group"
+    >
+      <div className="flex items-center gap-3">
+        {/* Icon */}
+        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+          <ArrowLeftRight size={14} className="text-blue-500" />
+        </div>
+
+        {/* Label */}
+        <div className="flex-1 min-w-0">
+          {parsed ? (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-sm font-medium text-foreground truncate max-w-[8rem]">{parsed.from}</span>
+              <ArrowRight size={12} className="text-blue-400 flex-shrink-0" />
+              <span className="text-sm font-medium text-foreground truncate max-w-[8rem]">{parsed.to}</span>
+            </div>
+          ) : (
+            <p className="text-sm font-medium truncate">{tx.title}</p>
+          )}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Badge
+              variant="outline"
+              className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300 dark:border-blue-700"
+            >
+              Перевод
+            </Badge>
+            {tx.note && (
+              <span className="text-xs text-muted-foreground truncate max-w-[12rem]">{tx.note}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Amount + delete */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <span className="text-sm font-semibold tabular-nums text-blue-500">
+            {fmt(tx.amount)}
+          </span>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            data-testid={`btn-delete-transaction-${tx.id}`}
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-0.5"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Строка обычной транзакции ────────────────────────────────────
 function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[]; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
-  const isIncome   = tx.type === "income";
-  const isTransfer = tx.type === "transfer" || tx.type === "creditPayment";
-  const isExpense  = tx.type === "expense" || tx.type === "creditPurchase";
+  const isIncome  = tx.type === "income";
+  const isExpense = tx.type === "expense" || tx.type === "creditPurchase";
 
-  const amountColor = isIncome ? "text-income" : isTransfer ? "text-blue-500" : "text-expense";
+  const amountColor = isIncome ? "text-income" : "text-expense";
   const iconBg      = isIncome
     ? "bg-emerald-100 dark:bg-emerald-900/30"
-    : isTransfer
-    ? "bg-blue-100 dark:bg-blue-900/30"
     : "bg-red-100 dark:bg-red-900/30";
   const icon = isIncome
     ? <TrendingUp size={14} className="text-income" />
-    : isTransfer
-    ? <ArrowLeftRight size={14} className="text-blue-500" />
     : <TrendingDown size={14} className="text-expense" />;
-  const prefix = isIncome || (isTransfer && tx.amount > 0) ? "+" : "−";
+  const prefix = isIncome ? "+" : "−";
 
-  const txAccount = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
+  const txAccount  = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
   const isTruncated = tx.title.length > 28;
 
   return (
@@ -87,14 +161,7 @@ function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[
             )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-            {tx.type === "transfer" ? (
-              <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300">
-                Перевод
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
-            )}
-            <span className="text-xs text-muted-foreground">{formatDate(tx.date)}</span>
+            <Badge variant="secondary" className="text-xs px-1.5 py-0 h-4 font-normal">{tx.category}</Badge>
             {txAccount && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: txAccount.color ?? "#20808D" }} />
@@ -127,7 +194,7 @@ function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[
   );
 }
 
-// ── Селектор счёта с цветовой точкой ────────────────────────────────────
+// ── Селектор счёта ────────────────────────────────────────────
 function AccountSelect({
   value, onChange, accounts, placeholder, testId,
 }: {
@@ -162,20 +229,20 @@ function AccountSelect({
   );
 }
 
-// ── Главная страница ────────────────────────────────────────────────────
+// ── Главная страница ───────────────────────────────────────────
 export default function Transactions() {
   const { toast } = useToast();
   const [open, setOpen]       = useState(false);
   const [filter, setFilter]   = useState<FilterType>("all");
   const [mode, setMode]       = useState<FormMode>("expense");
 
-  // Форма обычной операции
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
+
   const [form, setForm] = useState<Partial<InsertTransaction> & { accountId?: number }>({
     type: "expense",
     date: format(new Date(), "yyyy-MM-dd"),
   });
 
-  // Форма перевода
   const [transfer, setTransfer] = useState<{
     fromAccountId?: number;
     toAccountId?: number;
@@ -221,24 +288,43 @@ export default function Transactions() {
     },
   });
 
+  // Transfer deletion: remove both legs atomically via /api/transfers/:id
+  // Regular deletion: remove single income/expense row via /api/transactions/:id
   const deleteMut = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`),
+    mutationFn: ({ id, isTransfer }: { id: number; isTransfer: boolean }) =>
+      apiRequest("DELETE", isTransfer ? `/api/transfers/${id}` : `/api/transactions/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
     },
   });
 
-  // ── Фильтрация ───────────────────────────────────────────────────────
-  const filtered = transactions.filter(t => {
-    if (filter === "all")      return true;
-    if (filter === "income")   return t.type === "income";
-    if (filter === "expense")  return t.type === "expense" || t.type === "creditPurchase";
-    if (filter === "transfer") return t.type === "transfer" || t.type === "creditPayment";
-    return true;
-  });
+  const handleDelete = (tx: Transaction) => {
+    deleteMut.mutate({ id: tx.id, isTransfer: tx.type === "transfer" });
+  };
 
-  // ── Итоги (transfer и creditPayment — не доход и не расход) ──────────
+  // ── Фильтрация ──────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let list = transactions;
+
+    if (filter !== "all") {
+      list = list.filter(t => {
+        if (filter === "income")   return t.type === "income";
+        if (filter === "expense")  return t.type === "expense" || t.type === "creditPurchase";
+        if (filter === "transfer") return t.type === "transfer";
+        return true;
+      });
+    }
+
+    if (selectedAccountIds.size > 0) {
+      list = list.filter(t => t.accountId != null && selectedAccountIds.has(t.accountId));
+    }
+
+    return list;
+  }, [transactions, filter, selectedAccountIds]);
+
+  const groups = useMemo(() => groupByDate(filtered), [filtered]);
+
   const totalIncome  = transactions.filter(t => t.type === "income").reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalExpense = transactions.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
 
@@ -286,6 +372,13 @@ export default function Transactions() {
   const fromAcc = activeAccounts.find(a => a.id === transfer.fromAccountId);
   const toAcc   = activeAccounts.find(a => a.id === transfer.toAccountId);
 
+  const renderRow = (tx: Transaction) => {
+    if (tx.type === "transfer") {
+      return <TransferRow tx={tx} onDelete={() => handleDelete(tx)} />;
+    }
+    return <TxRow tx={tx} accounts={activeAccounts} onDelete={() => handleDelete(tx)} />;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -299,7 +392,7 @@ export default function Transactions() {
       </div>
 
       {/* Фильтры */}
-      <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar" data-testid="filter-tabs">
+      <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar" data-testid="filter-tabs">
         {FILTERS.map(f => (
           <button
             key={f.value}
@@ -313,6 +406,14 @@ export default function Transactions() {
             {f.label}
           </button>
         ))}
+
+        {activeAccounts.length > 0 && (
+          <CardFilterBar
+            accounts={activeAccounts}
+            selectedAccountIds={selectedAccountIds}
+            onSelectionChange={setSelectedAccountIds}
+          />
+        )}
       </div>
 
       {/* Итоги */}
@@ -339,16 +440,37 @@ export default function Transactions() {
 
       {/* Список */}
       <Card>
-        <CardContent className="p-0">
-          {filtered.length === 0 ? (
-            <p className="text-center text-muted-foreground py-12 text-sm">Нет операций</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {filtered.map(tx => (
-                <TxRow key={tx.id} tx={tx} accounts={activeAccounts} onDelete={() => deleteMut.mutate(tx.id)} />
-              ))}
-            </div>
-          )}
+        <CardContent className="p-0 overflow-hidden">
+          <AnimatePresence mode="wait">
+            {groups.length === 0 ? (
+              <motion.p
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-center text-muted-foreground py-12 text-sm"
+              >
+                Нет операций
+              </motion.p>
+            ) : (
+              <motion.div
+                key="list"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="divide-y divide-border"
+              >
+                {groups.map((group, i) => (
+                  <TransactionDateGroup
+                    key={group.dateKey}
+                    group={group}
+                    index={i}
+                    renderRow={renderRow}
+                  />
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </CardContent>
       </Card>
 
@@ -362,7 +484,6 @@ export default function Transactions() {
           </DialogHeader>
 
           <div className="space-y-3">
-            {/* Переключатель режима */}
             <div className="grid grid-cols-3 gap-1.5 p-1 bg-muted rounded-xl">
               {([
                 { v: "expense"  as FormMode, label: "Расход",  activeClass: "bg-red-50 border-red-300 text-red-700 dark:bg-red-900/20 dark:text-red-400" },
@@ -383,7 +504,6 @@ export default function Transactions() {
               ))}
             </div>
 
-            {/* ── Форма перевода ───────────────────────────────────── */}
             {mode === "transfer" ? (
               <>
                 {activeAccounts.length < 2 ? (
@@ -394,7 +514,6 @@ export default function Transactions() {
                   </div>
                 ) : (
                   <>
-                    {/* Визуальная стрелка FROM → TO */}
                     <div className="flex items-center gap-2">
                       <div className="flex-1">
                         <Label className="text-xs text-muted-foreground">Откуда</Label>
@@ -423,7 +542,6 @@ export default function Transactions() {
                       </div>
                     </div>
 
-                    {/* Превью счетов если выбраны */}
                     {fromAcc && toAcc && (
                       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
                         <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: fromAcc.color ?? "#20808D" }} />
@@ -436,44 +554,33 @@ export default function Transactions() {
 
                     <div>
                       <Label htmlFor="tr-amount">Сумма (₽)</Label>
-                      <Input
-                        id="tr-amount"
-                        type="number"
-                        placeholder="0"
+                      <Input id="tr-amount" type="number" placeholder="0"
                         value={transfer.amount ?? ""}
                         onChange={e => setTransfer(t => ({ ...t, amount: Number(e.target.value) }))}
-                        className="mt-1"
-                      />
+                        className="mt-1" />
                     </div>
                     <div>
                       <Label htmlFor="tr-date">Дата</Label>
-                      <Input
-                        id="tr-date"
-                        type="date"
+                      <Input id="tr-date" type="date"
                         value={transfer.date}
                         onChange={e => setTransfer(t => ({ ...t, date: e.target.value }))}
-                        className="mt-1"
-                      />
+                        className="mt-1" />
                     </div>
                     <div>
                       <Label htmlFor="tr-note">Комментарий <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
-                      <Input
-                        id="tr-note"
-                        placeholder="Например, пополнение копилки"
+                      <Input id="tr-note" placeholder="Например, пополнение копилки"
                         value={transfer.note ?? ""}
                         onChange={e => setTransfer(t => ({ ...t, note: e.target.value }))}
-                        className="mt-1"
-                      />
+                        className="mt-1" />
                     </div>
                   </>
                 )}
               </>
             ) : (
-              /* ── Форма обычной операции ──────────────────────────── */
               <>
                 {activeAccounts.length > 0 && (
                   <div>
-                    <Label>Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                    <Label>Счёт <span className="text-muted-foreground font-normal">(необязатемьно)</span></Label>
                     <Select
                       value={form.accountId ? String(form.accountId) : "none"}
                       onValueChange={v => setForm(f => ({ ...f, accountId: v === "none" ? undefined : Number(v) }))}

@@ -78,7 +78,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     startScheduler(pg);
   }
 
-  // ── iOS SHORTCUTS ─────────────────────────────────────────────────────
+  // ── iOS SHORTCUTS ─────────────────────────────────────────────────────────
   app.use("/api/ios", iosShortcutsRouter);
 
   // ── AUTH ────────────────────────────────────────────────────────────────
@@ -150,9 +150,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── FORGOT PASSWORD (Step 1) ──────────────────────────────────────────
-  // Генерирует 6-значный OTP-код, хранит SHA-256 хеш в БД, отправляет письмо.
-  // Пароль НЕ меняется до шага 3.
-
   app.post("/api/auth/forgot-password", forgotPasswordLimiter, async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured" });
 
@@ -168,11 +165,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       const { randomBytes, createHash, randomInt } = await import("crypto");
 
-      // 6-значный OTP-код — crypto.randomInt вместо Math.random() (CSPRNG)
       const rawCode = String(randomInt(100000, 1000000));
       const codeHash = createHash("sha256").update(rawCode).digest("hex");
 
-      // tokenHash — служебное поле (required unique), заполняем рандомным
       const tokenHash = createHash("sha256").update(randomBytes(32)).digest("hex");
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
@@ -192,8 +187,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── VERIFY RESET CODE (Step 2) ───────────────────────────────────────
-  // Проверяет код — пароль НЕ меняется. Возвращает { valid: true } если код верен.
-
   app.post("/api/auth/verify-reset-code", resetPasswordLimiter, async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured" });
 
@@ -227,8 +220,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ── RESET PASSWORD (Step 3) ─────────────────────────────────────────
-  // Повторно проверяет код + меняет пароль в БД. Только здесь пароль меняется.
-
   app.post("/api/auth/reset-password", resetPasswordLimiter, async (req, res) => {
     if (!pg) return res.status(503).json({ error: "Database not configured" });
 
@@ -347,13 +338,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ── PAT ЧЕРЕЗ ЛОГИН (для iOS Shortcuts — не требует cookie) ──────────────
-  // Логика:
-  //   1. Проверяем email + password
-  //   2. Если у пользователя уже есть действующий PAT — возвращаем его
-  //   3. Если нет — создаём новый с истечением 365 дней и возвращаем
-  // Шорткат сохраняет токен в finwise_token.txt и больше не трогает авторизацию.
-
   app.post("/api/pat/login", async (req, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     try {
@@ -370,7 +354,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       pg.touchLastLogin(user.id).catch(() => {});
 
-      // Проверяем наличие действующего PAT
       const existingTokens = await pg.getPersonalAccessTokens(user.id);
       const now = new Date();
       const activePat = existingTokens.find(
@@ -378,16 +361,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       );
 
       if (activePat) {
-        // Токен уже есть — возвращаем его данные.
-        // Примечание: getPersonalAccessTokens не отдаёт сам token (по соображениям безопасности),
-        // поэтому получаем полную строку токена напрямую из БД.
         const fullPat = await pg.getPersonalAccessTokenById(activePat.id, user.id);
         if (fullPat) {
           return res.json({ token: fullPat.token, expiresAt: fullPat.expiresAt, id: fullPat.id });
         }
       }
 
-      // Токена нет — создаём новый на 365 дней
       const token = generatePAT();
       const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
       const pat = await pg.createPersonalAccessToken(user.id, token, expiresAt, "iOS Shortcuts");
@@ -480,7 +459,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       }
 
       const nowTs = new Date().toISOString();
-      const title = `Перевод: ${fromAcc.name} → ${toAcc.name}`;
+      const title = `Перевод: ${fromAcc.name} \u2192 ${toAcc.name}`;
       const category = "Перевод";
 
       const outTx = await pg.addTransaction(userId, {
@@ -520,6 +499,30 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       await pg.updateTransaction(outTx.id, userId, { linkedTransactionId: inTx.id });
 
       res.json({ out: { ...outTx, linkedTransactionId: inTx.id }, in: inTx });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  /**
+   * DELETE /api/transfers/:id
+   * Atomically deletes both legs of a transfer.
+   * The :id can be the id of either leg — the other is found via linkedTransactionId.
+   */
+  app.delete("/api/transfers/:id", guard, async (req: AuthRequest, res) => {
+    if (!pg) return res.status(503).json({ error: "DB required" });
+    const userId = getUserId(req);
+    const txId = z.coerce.number().parse(req.params.id);
+    try {
+      const allTxs = await pg.getTransactions(userId);
+      const tx = allTxs.find(t => t.id === txId);
+      if (!tx) return res.status(404).json({ error: "Транзакция не найдена" });
+      // Delete the linked leg first (if it exists), then the requested one
+      if (tx.linkedTransactionId) {
+        await pg.deleteTransaction(tx.linkedTransactionId, userId).catch(() => {});
+      }
+      await pg.deleteTransaction(txId, userId);
+      res.json({ ok: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }

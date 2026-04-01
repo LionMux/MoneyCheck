@@ -4,7 +4,7 @@
  * plus extended methods for users, accounts, notifications, etc.
  */
 
-import { eq, and, desc, sql, asc, isNull } from "drizzle-orm";
+import { eq, and, desc, sql, asc, isNull, ne, inArray } from "drizzle-orm";
 import { db } from "./db";
 import * as S from "@shared/schema";
 import { format } from "date-fns";
@@ -179,6 +179,22 @@ const DEFAULT_CATEGORIES = [
   { name: "Здоровье",      type: "expense", icon: "Heart",          color: "#A84B2F", isDefault: true, sortOrder: 7 },
   { name: "Одежда",        type: "expense", icon: "Shirt",          color: "#848456", isDefault: true, sortOrder: 8 },
 ];
+
+// ─── TRANSACTION TYPES BY ACCOUNT KIND ──────────────────────────────────────
+
+/**
+ * Types that represent real, settled movements on a debit/cash/other account.
+ * creditPurchase and creditPayment belong exclusively to credit accounts and
+ * must never be summed into a debit balance.
+ */
+const DEBIT_SETTLED_TYPES = ["income", "expense", "transfer"] as const;
+
+/**
+ * Types that represent the outstanding debt on a credit account.
+ * income/expense/transfer on a credit account are not used in normal flows,
+ * so we intentionally restrict to these two types only.
+ */
+const CREDIT_DEBT_TYPES = ["creditPurchase", "creditPayment"] as const;
 
 // ─── PG STORAGE CLASS ────────────────────────────────────────────────────────
 
@@ -355,23 +371,70 @@ export class PgStorage {
     await this.deleteAccount(id, userId);
   }
 
+  /**
+   * Returns the current settled balance for a debit, cash, or other account.
+   *
+   * Rules:
+   *  - Only transactions with isPlanned = false are counted (planned ≠ settled).
+   *  - Only types relevant to non-credit accounts are included:
+   *    income, expense, transfer.
+   *  - creditPurchase / creditPayment are credit-account-only types and are
+   *    explicitly excluded so they never corrupt a debit balance.
+   *  - Aggregation is done in a single SQL query; no JS-side reduce over all rows.
+   */
   async getAccountBalance(accountId: number): Promise<number> {
-    const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
+    const [acc] = await db
+      .select({ initialBalance: S.accounts.initialBalance })
+      .from(S.accounts)
+      .where(eq(S.accounts.id, accountId));
+
     if (!acc) return 0;
-    const txs = await db.select().from(S.transactions).where(eq(S.transactions.accountId, accountId));
-    const delta = txs.reduce((sum, tx) => sum + tx.amount, 0);
-    return acc.initialBalance + delta;
+
+    const [row] = await db
+      .select({ delta: sql<number>`coalesce(sum(amount), 0)` })
+      .from(S.transactions)
+      .where(
+        and(
+          eq(S.transactions.accountId, accountId),
+          eq(S.transactions.isPlanned, false),
+          inArray(S.transactions.type, [...DEBIT_SETTLED_TYPES])
+        )
+      );
+
+    return acc.initialBalance + (row?.delta ?? 0);
   }
 
+  /**
+   * Returns the current outstanding debt for a credit account.
+   *
+   * Rules:
+   *  - Only transactions with isPlanned = false are counted.
+   *  - Only creditPurchase and creditPayment types are included.
+   *    creditPurchase adds to the debt (negative amount), creditPayment
+   *    reduces it (positive amount) — the sign convention is already encoded
+   *    in the amount field at creation time.
+   *  - Aggregation is done in a single SQL query.
+   */
   async getCreditDebt(accountId: number): Promise<number> {
-    const [acc] = await db.select().from(S.accounts).where(eq(S.accounts.id, accountId));
+    const [acc] = await db
+      .select({ initialBalance: S.accounts.initialBalance })
+      .from(S.accounts)
+      .where(eq(S.accounts.id, accountId));
+
     if (!acc) return 0;
-    const txs = await db.select().from(S.transactions)
-      .where(eq(S.transactions.accountId, accountId));
-    const txDelta = txs
-      .filter(t => t.type === "creditPurchase" || t.type === "creditPayment")
-      .reduce((sum, t) => sum + t.amount, 0);
-    return acc.initialBalance + txDelta;
+
+    const [row] = await db
+      .select({ delta: sql<number>`coalesce(sum(amount), 0)` })
+      .from(S.transactions)
+      .where(
+        and(
+          eq(S.transactions.accountId, accountId),
+          eq(S.transactions.isPlanned, false),
+          inArray(S.transactions.type, [...CREDIT_DEBT_TYPES])
+        )
+      );
+
+    return acc.initialBalance + (row?.delta ?? 0);
   }
 
   // ── TRANSACTIONS ──────────────────────────────────────────────────────────
