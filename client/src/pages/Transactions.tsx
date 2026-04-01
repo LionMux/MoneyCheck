@@ -48,16 +48,16 @@ function resolveType(formType: "income" | "expense", account?: Account): string 
  * Returns { from, to } or null if format doesn't match.
  */
 function parseTransferTitle(title: string): { from: string; to: string } | null {
-  // Use explicit unicode escape for the arrow to avoid any source-encoding issues
-  const arrow = "\u2192";
-  const prefix = "Перевод: ";
-  if (!title.startsWith(prefix)) return null;
-  const rest = title.slice(prefix.length);
-  const idx  = rest.indexOf(` ${arrow} `);
+  const ARROW   = "\u2192";         // →  U+2192 RIGHTWARDS ARROW
+  const SEP     = ` ${ARROW} `;    // " → "
+  const PREFIX  = "Перевод: ";
+  if (!title.startsWith(PREFIX)) return null;
+  const rest = title.slice(PREFIX.length);
+  const idx  = rest.indexOf(SEP);
   if (idx === -1) return null;
   return {
     from: rest.slice(0, idx).trim(),
-    to:   rest.slice(idx + 3).trim(), // " → " is 3 chars
+    to:   rest.slice(idx + SEP.length).trim(),  // explicit SEP.length, not magic 3
   };
 }
 
@@ -288,13 +288,20 @@ export default function Transactions() {
     },
   });
 
+  // Transfer deletion: remove both legs atomically via /api/transfers/:id
+  // Regular deletion: remove single income/expense row via /api/transactions/:id
   const deleteMut = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`),
+    mutationFn: ({ id, isTransfer }: { id: number; isTransfer: boolean }) =>
+      apiRequest("DELETE", isTransfer ? `/api/transfers/${id}` : `/api/transactions/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
     },
   });
+
+  const handleDelete = (tx: Transaction) => {
+    deleteMut.mutate({ id: tx.id, isTransfer: tx.type === "transfer" });
+  };
 
   // ── Фильтрация ──────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -365,12 +372,11 @@ export default function Transactions() {
   const fromAcc = activeAccounts.find(a => a.id === transfer.fromAccountId);
   const toAcc   = activeAccounts.find(a => a.id === transfer.toAccountId);
 
-  // renderRow: no key here — key is set on the wrapping <motion.div> in TransactionDateGroup
   const renderRow = (tx: Transaction) => {
     if (tx.type === "transfer") {
-      return <TransferRow tx={tx} onDelete={() => deleteMut.mutate(tx.id)} />;
+      return <TransferRow tx={tx} onDelete={() => handleDelete(tx)} />;
     }
-    return <TxRow tx={tx} accounts={activeAccounts} onDelete={() => deleteMut.mutate(tx.id)} />;
+    return <TxRow tx={tx} accounts={activeAccounts} onDelete={() => handleDelete(tx)} />;
   };
 
   return (
@@ -574,7 +580,7 @@ export default function Transactions() {
               <>
                 {activeAccounts.length > 0 && (
                   <div>
-                    <Label>Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                    <Label>Счёт <span className="text-muted-foreground font-normal">(необязатемьно)</span></Label>
                     <Select
                       value={form.accountId ? String(form.accountId) : "none"}
                       onValueChange={v => setForm(f => ({ ...f, accountId: v === "none" ? undefined : Number(v) }))}

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 import { motion } from "framer-motion";
 import { format, isToday, isYesterday } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -42,20 +42,41 @@ export interface DateGroup {
 }
 
 /**
+ * TZ-safe date key extractor.
+ *
+ * The backend may return dates as:
+ *   - "2026-03-31"             (date-only string)
+ *   - "2026-03-31T00:00:00Z"  (ISO UTC midnight)
+ *   - "2026-03-31T21:00:00.000Z" (UTC that may cross local midnight)
+ *
+ * We parse into a local Date and then format with the Swedish locale
+ * (sv) which produces "YYYY-MM-DD" — effectively toLocaleDateString
+ * in ISO format, but in the user's local timezone.
+ */
+function toLocalDateKey(dateValue: string | Date): string {
+  try {
+    // If it already looks like a plain date string (no T), keep as-is
+    const s = String(dateValue);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // Otherwise parse and re-format in local timezone
+    return new Date(s).toLocaleDateString("sv"); // sv = ISO YYYY-MM-DD
+  } catch {
+    return String(dateValue).slice(0, 10);
+  }
+}
+
+/**
  * Groups transactions by date and collapses transfer pairs into one row.
  *
  * The backend creates two `transfer` rows per operation:
  *   outTx: amount < 0, linkedTransactionId = inTx.id
  *   inTx:  amount > 0, linkedTransactionId = outTx.id
  *
- * We identify the INCOMING leg as: type=="transfer" && amount > 0
- * && its id is referenced by some outgoing leg's linkedTransactionId.
- * Those are excluded from the list; only the outgoing leg is shown.
+ * Strategy: collect ids of incoming legs (outgoing legs reference them
+ * via linkedTransactionId), then skip those ids entirely.
  */
 export function groupByDate(transactions: Transaction[]): DateGroup[] {
-  // Build a set of IDs that are the incoming leg of a transfer pair.
-  // An outgoing leg is: type=="transfer", amount < 0, linkedTransactionId != null.
-  // Its linkedTransactionId is the incoming leg's id — exclude that.
+  // Pass 1 — collect incoming leg IDs
   const incomingIds = new Set<number>();
   for (const tx of transactions) {
     if (
@@ -67,10 +88,11 @@ export function groupByDate(transactions: Transaction[]): DateGroup[] {
     }
   }
 
+  // Pass 2 — group by local date, skip incoming legs
   const map = new Map<string, Transaction[]>();
   for (const tx of transactions) {
-    if (incomingIds.has(tx.id)) continue; // skip incoming leg
-    const key = String(tx.date).slice(0, 10);
+    if (incomingIds.has(tx.id)) continue;
+    const key = toLocalDateKey(tx.date as string);
     const arr = map.get(key) ?? [];
     arr.push(tx);
     map.set(key, arr);
@@ -99,8 +121,8 @@ export function TransactionDateGroup({
     let income = 0;
     let expense = 0;
     for (const tx of group.transactions) {
-      if (tx.type === "income")                                    income  += Math.abs(tx.amount);
-      if (tx.type === "expense" || tx.type === "creditPurchase")  expense += Math.abs(tx.amount);
+      if (tx.type === "income")                                   income  += Math.abs(tx.amount);
+      if (tx.type === "expense" || tx.type === "creditPurchase") expense += Math.abs(tx.amount);
     }
     return { totalIncome: income, totalExpense: expense };
   }, [group.transactions]);

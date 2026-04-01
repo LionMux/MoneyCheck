@@ -26,7 +26,17 @@ export function CardFilterBar({
     onSelectionChange(next);
   };
 
-  const selectAll = () => onSelectionChange(new Set<number>());
+  const selectAll = () => {
+    // Empty Set = "no filter" = show all accounts
+    onSelectionChange(new Set<number>());
+    setOpen(false);
+  };
+
+  const selectAllExplicit = () => {
+    onSelectionChange(new Set(accounts.map(a => a.id)));
+    setOpen(false);
+  };
+
   const hasFilter = selectedAccountIds.size > 0;
 
   return (
@@ -80,7 +90,7 @@ export function CardFilterBar({
       <AnimatePresence>
         {open && (
           <>
-            {/* Backdrop (closes on click outside) */}
+            {/* Backdrop — closes on outside click */}
             <motion.div
               key="backdrop"
               initial={{ opacity: 0 }}
@@ -153,9 +163,7 @@ export function CardFilterBar({
               {/* ── Footer actions ──────────────────────────────── */}
               <div className="border-t mt-1.5 pt-1.5 flex gap-1">
                 <button
-                  onClick={() => {
-                    onSelectionChange(new Set(accounts.map(a => a.id)));
-                  }}
+                  onClick={selectAllExplicit}
                   className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   Все
