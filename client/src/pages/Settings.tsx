@@ -1,3 +1,4 @@
+import { useDisplayPreferences } from "@/contexts/DisplayPreferencesContext";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -5,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid,
   Smartphone, ArrowDownToLine, TrendingUp, TrendingDown, Zap, ChevronRight,
-  Eye, EyeOff, Wallet,
+  Eye, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,15 +128,7 @@ function ShortcutCard({
 
 // ── Display preferences section ──────────────────────────────────────────────
 function DisplayPreferences() {
-  const [showBalance, setShowBalance] = useState(() => {
-    try { return localStorage.getItem("txShowBalance") === "1"; } catch { return false; }
-  });
-
-  const toggle = () => {
-    const next = !showBalance;
-    setShowBalance(next);
-    try { localStorage.setItem("txShowBalance", next ? "1" : "0"); } catch { /* */ }
-  };
+  const { showBalance, setShowBalance } = useDisplayPreferences();
 
   return (
     <div className="space-y-3">
@@ -148,7 +141,7 @@ function DisplayPreferences() {
 
       {/* Toggle card */}
       <button
-        onClick={toggle}
+        onClick={() => setShowBalance(!showBalance)}
         className={cn(
           "w-full flex items-center gap-4 rounded-xl border px-4 py-4 text-left",
           "transition-all duration-200 hover:bg-muted/40 active:scale-[0.99]",
@@ -191,7 +184,6 @@ function DisplayPreferences() {
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider px-4 pt-3 pb-1.5">Предпросмотр</p>
         <div className="px-4 pb-4 flex items-center gap-3">
-          {/* Mocked transaction row */}
           <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
             <TrendingDown size={14} className="text-red-500" />
           </div>
@@ -213,7 +205,6 @@ function DisplayPreferences() {
           <span className="text-sm font-semibold text-red-500 tabular-nums">− 2 500 ₽</span>
         </div>
 
-        {/* Account chip preview */}
         {showBalance && (
           <div className="px-4 pb-4 flex flex-wrap gap-2 border-t border-border pt-3">
             <p className="w-full text-[11px] text-muted-foreground mb-1">Фильтр счетов:</p>

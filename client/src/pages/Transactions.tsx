@@ -18,6 +18,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { CardFilterBar } from "@/components/CardFilterBar";
 import { groupByDate } from "@/components/TransactionDateGroup";
 import { DroppableDateGroup } from "@/components/DroppableDateGroup";
+import { useDisplayPreferences } from "@/contexts/DisplayPreferencesContext";
 import {
   DndContext,
   DragOverlay,
@@ -122,6 +123,8 @@ function TxRow({
   const prefix = isIncome ? "+" : "\u2212";
   const txAccount  = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
   const isTruncated = tx.title.length > 28;
+  // Use currentBalance if available from server, otherwise fall back to initialBalance
+  const displayBalance = txAccount ? ((txAccount as any).currentBalance ?? txAccount.initialBalance ?? 0) : 0;
   return (
     <div data-testid={`transaction-item-${tx.id}`} className="px-4 py-3 hover:bg-muted/40 transition-colors group"
       onClick={() => isTruncated && setExpanded(e => !e)}>
@@ -140,9 +143,9 @@ function TxRow({
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: txAccount.color ?? "#20808D" }} />
                 {txAccount.name}
-                {showBalance && txAccount.initialBalance != null && (
+                {showBalance && (
                   <span className="ml-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted tabular-nums">
-                    {fmt(txAccount.initialBalance)}
+                    {fmt(displayBalance)}
                   </span>
                 )}
               </span>
@@ -194,17 +197,12 @@ function AccountSelect({ value, onChange, accounts, placeholder, testId }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Transactions() {
   const { toast } = useToast();
+  const { showBalance } = useDisplayPreferences();
   const [open, setOpen]       = useState(false);
   const [filter, setFilter]   = useState<FilterType>("all");
   const [mode, setMode]       = useState<FormMode>("expense");
-  // Empty Set = no account filter (show all). Non-empty = filter to those IDs.
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
   const [activeDragId, setActiveDragId] = useState<number | null>(null);
-
-  // Read show-balance preference from localStorage (set in Settings)
-  const [showBalance] = useState(() => {
-    try { return localStorage.getItem("txShowBalance") === "1"; } catch { return false; }
-  });
 
   const [form, setForm] = useState<Partial<InsertTransaction> & { accountId?: number }>({
     type: "expense",
@@ -231,13 +229,11 @@ export default function Transactions() {
   const formType         = (form.type === "expense" || form.type === "creditPurchase") ? "expense" : "income";
   const filteredCategories = allCategories.filter(c => c.type === formType);
 
-  // ── DnD sensors ────────────────────────────────────────────────────────────
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor,   { activationConstraint: { delay: 200, tolerance: 8 } }),
   );
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
   const addMut = useMutation({
     mutationFn: (data: InsertTransaction) => apiRequest("POST", "/api/transactions", data),
     onSuccess: () => {
@@ -290,15 +286,12 @@ export default function Transactions() {
     onSettled: () => { queryClient.invalidateQueries({ queryKey: ["/api/transactions"] }); },
   });
 
-  // Mutation for reordering within the same day (no date change, just visual reorder)
-  // We store the local order in state and sync it optimistically
   const [localOrder, setLocalOrder] = useState<number[] | null>(null);
 
   const handleDelete = (tx: Transaction) => {
     deleteMut.mutate({ id: tx.id, isTransfer: tx.type === "transfer" });
   };
 
-  // ── DnD handlers ───────────────────────────────────────────────────────────
   function handleDragStart(event: DragStartEvent) {
     setActiveDragId(event.active.id as number);
   }
@@ -309,16 +302,12 @@ export default function Transactions() {
     if (!over) return;
 
     const txId = active.id as number;
-
-    // Determine target date and whether this is a same-day reorder
     let targetDate: string | null = null;
     let isSameDay = false;
 
     if (typeof over.id === "string" && over.id.startsWith("date:")) {
-      // Dropped on the droppable zone of a date group
       targetDate = over.id.slice(5);
     } else if (typeof over.id === "number") {
-      // Dropped onto another transaction — find its date
       const overTx = transactions.find(t => t.id === over.id);
       if (overTx) {
         const s = String(overTx.date);
@@ -339,7 +328,6 @@ export default function Transactions() {
     isSameDay = targetDate === currentDate;
 
     if (isSameDay && typeof over.id === "number" && over.id !== txId) {
-      // Same-day reorder: update local order optimistically
       const allIds = transactions
         .filter(t => {
           const s = String(t.date);
@@ -357,35 +345,29 @@ export default function Transactions() {
       return;
     }
 
-    if (isSameDay) return; // dropped on the date header of own group — no-op
+    if (isSameDay) return;
 
     redateMut.mutate({ id: txId, date: targetDate });
   }
 
-  // ── Filtering ──────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = transactions;
     if (filter !== "all") {
       list = list.filter(t => {
         if (filter === "income")   return t.type === "income";
-        // Fix: when account filter is active, include ALL expense-type variants
         if (filter === "expense")  return t.type === "expense" || t.type === "creditPurchase";
         if (filter === "transfer") return t.type === "transfer";
         return true;
       });
     }
-    // Fix: account filter should show transactions for selected accounts,
-    // NOT filter to empty when an account is selected
     if (selectedAccountIds.size > 0) {
       list = list.filter(t =>
-        // include transactions that belong to any selected account
         t.accountId != null && selectedAccountIds.has(t.accountId)
       );
     }
     return list;
   }, [transactions, filter, selectedAccountIds]);
 
-  // Apply local same-day sort order on top of filtered
   const groupsRaw = useMemo(() => groupByDate(filtered), [filtered]);
   const groups = useMemo(() => {
     if (!localOrder || localOrder.length === 0) return groupsRaw;
@@ -463,7 +445,7 @@ export default function Transactions() {
         </Button>
       </div>
 
-      {/* Type filters — Все / Доходы / Расходы / Переводы */}
+      {/* Type filters */}
       <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar" data-testid="filter-tabs">
         {FILTERS.map(f => (
           <button key={f.value} onClick={() => setFilter(f.value)} data-testid={`filter-${f.value}`}
@@ -476,7 +458,7 @@ export default function Transactions() {
         ))}
       </div>
 
-      {/* Account filter — on its own row, below type filters */}
+      {/* Account filter — own row below type filters */}
       {activeAccounts.length > 0 && (
         <div className="-mt-3">
           <CardFilterBar
@@ -540,7 +522,6 @@ export default function Transactions() {
               )}
             </AnimatePresence>
 
-            {/* Drag overlay — ghost card while dragging */}
             <DragOverlay>
               {activeTx ? (
                 <div className="rounded-lg border bg-background shadow-xl opacity-90 pointer-events-none">
