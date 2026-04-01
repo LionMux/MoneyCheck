@@ -38,40 +38,38 @@ function fmt(n: number) {
 
 export interface DateGroup {
   dateKey: string;
-  /** Deduplicated list: transfer pairs are collapsed to a single outgoing tx */
   transactions: Transaction[];
 }
 
 /**
- * Groups transactions by date and deduplicates transfer pairs.
+ * Groups transactions by date and collapses transfer pairs into one row.
  *
- * The backend creates two `transfer` rows per operation and links them via
- * `linkedTransactionId`.  We only keep the **outgoing** leg (amount < 0)
- * and silently drop the mirror incoming leg.  This means the list shows one
- * row per transfer instead of two.
+ * The backend creates two `transfer` rows per operation:
+ *   outTx: amount < 0, linkedTransactionId = inTx.id
+ *   inTx:  amount > 0, linkedTransactionId = outTx.id
  *
- * Grouping is by `tx.date` (first 10 chars), sorted newest-first.
+ * We identify the INCOMING leg as: type=="transfer" && amount > 0
+ * && its id is referenced by some outgoing leg's linkedTransactionId.
+ * Those are excluded from the list; only the outgoing leg is shown.
  */
 export function groupByDate(transactions: Transaction[]): DateGroup[] {
-  // Collect IDs of incoming-leg transfers so we can skip them
-  const incomingTransferIds = new Set<number>();
-
+  // Build a set of IDs that are the incoming leg of a transfer pair.
+  // An outgoing leg is: type=="transfer", amount < 0, linkedTransactionId != null.
+  // Its linkedTransactionId is the incoming leg's id — exclude that.
+  const incomingIds = new Set<number>();
   for (const tx of transactions) {
-    if (tx.type === "transfer" && tx.linkedTransactionId != null) {
-      // outgoing leg: amount < 0.  Its linkedTransactionId points to the
-      // incoming leg.  Mark that incoming leg for exclusion.
-      if (tx.amount < 0) {
-        incomingTransferIds.add(tx.linkedTransactionId);
-      }
+    if (
+      tx.type === "transfer" &&
+      tx.amount < 0 &&
+      tx.linkedTransactionId != null
+    ) {
+      incomingIds.add(tx.linkedTransactionId);
     }
   }
 
   const map = new Map<string, Transaction[]>();
-
   for (const tx of transactions) {
-    // Skip the incoming half of transfer pairs
-    if (incomingTransferIds.has(tx.id)) continue;
-
+    if (incomingIds.has(tx.id)) continue; // skip incoming leg
     const key = String(tx.date).slice(0, 10);
     const arr = map.get(key) ?? [];
     arr.push(tx);

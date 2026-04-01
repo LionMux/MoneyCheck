@@ -43,14 +43,22 @@ function resolveType(formType: "income" | "expense", account?: Account): string 
 }
 
 /**
- * Parses the transfer title created by the backend:
- * "Перевод: Сбербанк → Тинькофф"  →  { from: "Сбербанк", to: "Тинькофф" }
- * Falls back gracefully if the format doesn't match.
+ * Parses the transfer title written by the backend:
+ *   "Перевод: Сбербанк \u2192 Тинькофф"
+ * Returns { from, to } or null if format doesn't match.
  */
 function parseTransferTitle(title: string): { from: string; to: string } | null {
-  const match = title.match(/^Перевод:\s*(.+?)\s*→\s*(.+)$/);
-  if (!match) return null;
-  return { from: match[1].trim(), to: match[2].trim() };
+  // Use explicit unicode escape for the arrow to avoid any source-encoding issues
+  const arrow = "\u2192";
+  const prefix = "Перевод: ";
+  if (!title.startsWith(prefix)) return null;
+  const rest = title.slice(prefix.length);
+  const idx  = rest.indexOf(` ${arrow} `);
+  if (idx === -1) return null;
+  return {
+    from: rest.slice(0, idx).trim(),
+    to:   rest.slice(idx + 3).trim(), // " → " is 3 chars
+  };
 }
 
 // ── Строка перевода ──────────────────────────────────────────────
@@ -72,15 +80,18 @@ function TransferRow({ tx, onDelete }: { tx: Transaction; onDelete: () => void }
         <div className="flex-1 min-w-0">
           {parsed ? (
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm font-medium text-foreground truncate max-w-[7rem]">{parsed.from}</span>
+              <span className="text-sm font-medium text-foreground truncate max-w-[8rem]">{parsed.from}</span>
               <ArrowRight size={12} className="text-blue-400 flex-shrink-0" />
-              <span className="text-sm font-medium text-foreground truncate max-w-[7rem]">{parsed.to}</span>
+              <span className="text-sm font-medium text-foreground truncate max-w-[8rem]">{parsed.to}</span>
             </div>
           ) : (
             <p className="text-sm font-medium truncate">{tx.title}</p>
           )}
           <div className="flex items-center gap-1.5 mt-0.5">
-            <Badge variant="outline" className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300">
+            <Badge
+              variant="outline"
+              className="text-xs px-1.5 py-0 h-4 font-normal text-blue-500 border-blue-300 dark:border-blue-700"
+            >
               Перевод
             </Badge>
             {tx.note && (
@@ -123,7 +134,7 @@ function TxRow({ tx, accounts, onDelete }: { tx: Transaction; accounts: Account[
     : <TrendingDown size={14} className="text-expense" />;
   const prefix = isIncome ? "+" : "−";
 
-  const txAccount = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
+  const txAccount  = tx.accountId ? accounts.find(a => a.id === tx.accountId) : null;
   const isTruncated = tx.title.length > 28;
 
   return (
@@ -354,25 +365,12 @@ export default function Transactions() {
   const fromAcc = activeAccounts.find(a => a.id === transfer.fromAccountId);
   const toAcc   = activeAccounts.find(a => a.id === transfer.toAccountId);
 
-  // Row renderer — routes transfer type to TransferRow, rest to TxRow
+  // renderRow: no key here — key is set on the wrapping <motion.div> in TransactionDateGroup
   const renderRow = (tx: Transaction) => {
     if (tx.type === "transfer") {
-      return (
-        <TransferRow
-          key={tx.id}
-          tx={tx}
-          onDelete={() => deleteMut.mutate(tx.id)}
-        />
-      );
+      return <TransferRow tx={tx} onDelete={() => deleteMut.mutate(tx.id)} />;
     }
-    return (
-      <TxRow
-        key={tx.id}
-        tx={tx}
-        accounts={activeAccounts}
-        onDelete={() => deleteMut.mutate(tx.id)}
-      />
-    );
+    return <TxRow tx={tx} accounts={activeAccounts} onDelete={() => deleteMut.mutate(tx.id)} />;
   };
 
   return (
