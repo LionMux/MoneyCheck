@@ -4,7 +4,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid,
-  Smartphone, ArrowDownToLine, TrendingUp, TrendingDown, Zap, ChevronRight
+  Smartphone, ArrowDownToLine, TrendingUp, TrendingDown, Zap, ChevronRight,
+  Eye, EyeOff, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
 } from "@/components/ui/alert-dialog";
 import CategoryManager from "@/components/CategoryManager";
+import { cn } from "@/lib/utils";
 
 interface PAT {
   id: number;
@@ -31,7 +33,7 @@ interface PAT {
 }
 
 function formatDate(iso: string | null) {
-  if (!iso) return "—";
+  if (!iso) return "\u2014";
   return new Date(iso).toLocaleDateString("ru-RU", {
     day: "2-digit", month: "short", year: "numeric",
   });
@@ -61,7 +63,6 @@ function ShortcutCard({
           : "border-emerald-500/20 bg-gradient-to-br from-emerald-950/40 via-card to-card hover:border-emerald-500/40 hover:shadow-emerald-900/20",
       ].join(" ")}
     >
-      {/* Гловерный блик — glow-эффект */}
       <div
         className={[
           "absolute -top-8 -right-8 w-32 h-32 rounded-full blur-3xl opacity-20 transition-opacity duration-300 group-hover:opacity-40",
@@ -70,7 +71,6 @@ function ShortcutCard({
       />
 
       <div className="relative p-5 flex flex-col gap-4">
-        {/* Шапка с иконкой */}
         <div className="flex items-start justify-between">
           <div
             className={[
@@ -96,7 +96,6 @@ function ShortcutCard({
           </div>
         </div>
 
-        {/* Текст */}
         <div>
           <p className="text-base font-semibold tracking-tight">
             {isRashod ? "Расход" : "Доход"}
@@ -109,7 +108,6 @@ function ShortcutCard({
           </p>
         </div>
 
-        {/* Кнопка */}
         <div
           className={[
             "flex items-center justify-center gap-2 w-full rounded-xl py-2.5 text-sm font-medium transition-colors",
@@ -124,6 +122,117 @@ function ShortcutCard({
         </div>
       </div>
     </button>
+  );
+}
+
+// ── Display preferences section ──────────────────────────────────────────────
+function DisplayPreferences() {
+  const [showBalance, setShowBalance] = useState(() => {
+    try { return localStorage.getItem("txShowBalance") === "1"; } catch { return false; }
+  });
+
+  const toggle = () => {
+    const next = !showBalance;
+    setShowBalance(next);
+    try { localStorage.setItem("txShowBalance", next ? "1" : "0"); } catch { /* */ }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
+        <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
+        <span>
+          Настройте отображение данных в разделе «Операции».
+        </span>
+      </div>
+
+      {/* Toggle card */}
+      <button
+        onClick={toggle}
+        className={cn(
+          "w-full flex items-center gap-4 rounded-xl border px-4 py-4 text-left",
+          "transition-all duration-200 hover:bg-muted/40 active:scale-[0.99]",
+          showBalance
+            ? "border-primary/30 bg-primary/5"
+            : "border-border bg-card",
+        )}
+      >
+        {/* Icon */}
+        <div className={cn(
+          "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors",
+          showBalance ? "bg-primary/15" : "bg-muted",
+        )}>
+          <Wallet size={18} className={showBalance ? "text-primary" : "text-muted-foreground"} />
+        </div>
+
+        {/* Text */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium leading-tight">
+            Остаток на счёте в Операциях
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Показывать баланс карты рядом с названием счёта в каждой операции и в фильтре счетов
+          </p>
+        </div>
+
+        {/* Toggle pill */}
+        <div className={cn(
+          "relative flex-shrink-0 w-11 h-6 rounded-full transition-colors duration-200",
+          showBalance ? "bg-primary" : "bg-muted-foreground/30",
+        )}>
+          <span className={cn(
+            "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200",
+            showBalance ? "translate-x-5" : "translate-x-0.5",
+          )} />
+        </div>
+      </button>
+
+      {/* Preview */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider px-4 pt-3 pb-1.5">Предпросмотр</p>
+        <div className="px-4 pb-4 flex items-center gap-3">
+          {/* Mocked transaction row */}
+          <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+            <TrendingDown size={14} className="text-red-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Продукты</p>
+            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+              <span className="text-xs bg-muted px-1.5 py-0.5 rounded-md">Еда</span>
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="w-2 h-2 rounded-full bg-[#20808D]" />
+                Тинькофф
+                {showBalance && (
+                  <span className="ml-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted tabular-nums">
+                    45 000 ₽
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+          <span className="text-sm font-semibold text-red-500 tabular-nums">− 2 500 ₽</span>
+        </div>
+
+        {/* Account chip preview */}
+        {showBalance && (
+          <div className="px-4 pb-4 flex flex-wrap gap-2 border-t border-border pt-3">
+            <p className="w-full text-[11px] text-muted-foreground mb-1">Фильтр счетов:</p>
+            {[
+              { name: "Тинькофф", color: "#20808D", balance: 45000 },
+              { name: "Сбер", color: "#1DB954", balance: 12300 },
+            ].map(acc => (
+              <span key={acc.name} className="flex items-center gap-2 rounded-xl border border-transparent bg-muted/60 px-3 py-2 text-sm">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: acc.color }} />
+                <span className="text-sm">{acc.name}</span>
+                <span className="text-[11px] font-medium tabular-nums px-1.5 py-0.5 rounded-full bg-muted-foreground/10 text-muted-foreground">
+                  {new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(acc.balance)}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -192,6 +301,10 @@ export default function SettingsPage() {
             <LayoutGrid size={15} />
             Категории
           </TabsTrigger>
+          <TabsTrigger value="display" className="flex-1 gap-2">
+            <Eye size={15} />
+            Отображение
+          </TabsTrigger>
           <TabsTrigger value="tokens" className="flex-1 gap-2">
             <Key size={15} />
             API-токены
@@ -212,6 +325,11 @@ export default function SettingsPage() {
             </span>
           </div>
           <CategoryManager />
+        </TabsContent>
+
+        {/* ── TAB: DISPLAY ── */}
+        <TabsContent value="display" className="mt-6">
+          <DisplayPreferences />
         </TabsContent>
 
         {/* ── TAB: API TOKENS ── */}
@@ -249,7 +367,7 @@ export default function SettingsPage() {
                     <p className="text-sm font-medium truncate">{pat.name}</p>
                     <p className="text-xs text-muted-foreground">
                       Создан {formatDate(pat.createdAt)}
-                      {" · "}
+                      {" \u00b7 "}
                       {isExpired(pat.expiresAt)
                         ? <span className="text-destructive">Истёк {formatDate(pat.expiresAt)}</span>
                         : <span>До {formatDate(pat.expiresAt)}</span>
@@ -277,7 +395,6 @@ export default function SettingsPage() {
         {/* ── TAB: SHORTCUTS / ВИДЖЕТЫ ── */}
         <TabsContent value="shortcuts" className="mt-6 space-y-5">
 
-          {/* Шаги */}
           <div className="space-y-2">
             {[
               { n: "1", text: "Перейдите во вкладку «API-токены» и создайте токен", sub: "Нужен для авторизации в Shortcuts" },
@@ -296,7 +413,6 @@ export default function SettingsPage() {
             ))}
           </div>
 
-          {/* Карточки */}
           <div className="grid gap-3 sm:grid-cols-2">
             <ShortcutCard type="rashod" onDownload={() => handleDownloadShortcut("rashod")} />
             <ShortcutCard type="dohod" onDownload={() => handleDownloadShortcut("dohod")} />
