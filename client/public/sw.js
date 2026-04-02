@@ -8,7 +8,7 @@
  */
 
 // Меняйте версию при каждом деплое (Vite подставывает хеш автоматически)
-const CACHE_VERSION = "finwise-v3";
+const CACHE_VERSION = "finwise-v4";
 const STATIC_ASSETS = ["/manifest.json"];
 
 // ── Install ────────────────────────────────────────────────────────────────
