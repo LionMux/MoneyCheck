@@ -1,0 +1,159 @@
+/*
+  SettingsDock — shared active pill tab bar
+  =========================================
+  Import this file in client/src/index.css:
+    @import './styles/settings-dock.css';
+
+  HOW IT WORKS:
+  - One absolutely-positioned .settings-dock__pill sits behind all buttons (z-index 1)
+  - JS measures offsetLeft + offsetWidth of the active button and sets inline styles
+  - The pill slides via transform + width transition (GPU-accelerated, no layout thrashing)
+  - Labels use max-width + opacity + translateX for smooth reveal without reflow
+  - prefers-reduced-motion: all transitions disabled
+*/
+
+/* ── Container ── */
+.settings-dock {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 68px;
+  padding: 10px;
+  background: hsl(var(--card));
+  border-radius: 9999px;
+  width: 100%;
+  border: 1px solid hsl(var(--border));
+  overflow: hidden; /* prevent pill from peeking outside on first render */
+}
+
+/* ── Tab buttons ── */
+.settings-dock__item {
+  position: relative;
+  z-index: 2;
+  height: 46px;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  cursor: pointer;
+  flex: 1;
+  transition:
+    color 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+  /* Ensure minimum tap target on mobile */
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* ── Icon inside each tab ── */
+.settings-dock__icon {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity   220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Label text: hidden in inactive tabs ── */
+.settings-dock__label {
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-4px);
+  font-size: 0.875rem; /* 14px */
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    max-width  260ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity    160ms ease,
+    transform  220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Active tab state ── */
+.settings-dock__item.is-active {
+  /*
+    Always use a fixed dark color — not a CSS variable — so the label
+    stays legible on the white pill in both light AND dark mode.
+  */
+  color: #151515;
+}
+
+.settings-dock__item.is-active .settings-dock__label {
+  max-width: 120px;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.settings-dock__item.is-active .settings-dock__icon {
+  transform: scale(1.05);
+}
+
+/* ── Hover / press micro-interactions ── */
+.settings-dock__item:hover {
+  transform: translateY(-1px);
+}
+
+.settings-dock__item:active {
+  transform: translateY(0);
+}
+
+/* Disable hover lift on real touch devices */
+@media (hover: none) {
+  .settings-dock__item:hover {
+    transform: none;
+  }
+}
+
+/* ── The sliding pill ── */
+.settings-dock__pill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 46px;
+  /* width is set by JS via inline style */
+  background: #ffffff;
+  border-radius: 9999px;
+  /* Initial position; JS overrides this immediately on mount */
+  transform: translate(10px, -50%);
+  transition:
+    transform   320ms cubic-bezier(0.16, 1, 0.3, 1),
+    width       320ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow  220ms cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 1;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  pointer-events: none;
+}
+
+/* Subtle inner highlight on the pill */
+.settings-dock__pill::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(245, 245, 245, 0.92) 100%
+  );
+  pointer-events: none;
+}
+
+/* ── Accessibility: reduce motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .settings-dock__item,
+  .settings-dock__icon,
+  .settings-dock__label,
+  .settings-dock__pill {
+    transition: none !important;
+  }
+}
