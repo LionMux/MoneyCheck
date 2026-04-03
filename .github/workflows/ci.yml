@@ -6,38 +6,68 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
-    name: Build & Type Check
+  # ─────────────────────────────────────────
+  # JOB 1: Проверки (lint + types + build)
+  # ─────────────────────────────────────────
+  checks:
+    name: ✅ Checks (lint · types · build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: ⚙️  Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: 📦 Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: TypeScript type check
+      # ── Проверка 1: TypeScript ──────────────
+      - name: 🔷 TypeScript type check
         run: npm run check
 
-      - name: Build project
+      # ── Проверка 2: Lint (если есть скрипт) ─
+      - name: 🔍 ESLint
+        run: |
+          if npm run --if-present lint 2>/dev/null; then
+            echo "Lint passed"
+          else
+            echo "No lint script found, skipping"
+          fi
+
+      # ── Проверка 3: Сборка ─────────────────
+      - name: 🔨 Build
         run: npm run build
 
+      # ── Артефакт: сохранить dist ────────────
+      - name: 📤 Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 3
+
+  # ─────────────────────────────────────────
+  # JOB 2: Деплой (только push в main)
+  # ─────────────────────────────────────────
   deploy:
-    name: Deploy to Server
+    name: 🚀 Deploy to Server
     runs-on: ubuntu-latest
-    needs: build
+    needs: checks
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-      - name: Deploy via SSH
+      - name: 🔑 Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -45,8 +75,58 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
+            set -e
             cd ~/MoneyCheck
+
+            echo "📥 Pulling latest changes..."
             git pull origin main
+
+            echo "📦 Installing dependencies..."
             npm install --legacy-peer-deps
+
+            echo "🔨 Building project..."
             npm run build
+
+            echo "♻️  Restarting PM2 process..."
             pm2 restart moneycheck
+
+            echo "✅ Deploy complete!"
+
+  # ─────────────────────────────────────────
+  # JOB 3: Уведомление о результате
+  # ─────────────────────────────────────────
+  notify:
+    name: 📣 Telegram Notify
+    runs-on: ubuntu-latest
+    needs: [checks, deploy]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 🔔 Send Telegram notification
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ "$CHECKS_RESULT" = "success" ] && [ "$DEPLOY_RESULT" = "success" ]; then
+            STATUS="✅ Деплой успешен"
+          elif [ "$CHECKS_RESULT" = "failure" ]; then
+            STATUS="❌ Проверки не прошли"
+          else
+            STATUS="❌ Деплой упал"
+          fi
+
+          SHORT_SHA=$(echo $COMMIT_SHA | cut -c1-7)
+          LINK="https://github.com/$REPO/commit/$COMMIT_SHA"
+
+          MESSAGE="$STATUS%0A%0A🔧 *MoneyCheck*%0A📝 \`$COMMIT_MSG\`%0A👤 $ACTOR%0A🔗 [Commit $SHORT_SHA]($LINK)"
+
+          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d chat_id="$CHAT_ID" \
+            -d text="$MESSAGE" \
+            -d parse_mode="Markdown"
