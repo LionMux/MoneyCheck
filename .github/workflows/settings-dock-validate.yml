@@ -1,0 +1,288 @@
+# GitHub Actions Pipeline: Settings Dock Tab Bar
+# ================================================
+# Runs on every push / PR that touches the settings tab-bar files.
+# Jobs:
+#   1. typecheck  — tsc --noEmit to catch type errors
+#   2. lint       — ESLint on changed files
+#   3. build      — Vite production build to catch bundler errors
+#   4. visual     — (manual trigger) Playwright screenshot diff
+
+name: "Settings Dock — Validate"
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+    paths:
+      - "client/src/components/settings/SettingsDock.tsx"
+      - "client/src/styles/settings-dock.css"
+      - "client/src/pages/Settings.tsx"
+      - "client/src/index.css"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "client/src/components/settings/SettingsDock.tsx"
+      - "client/src/styles/settings-dock.css"
+      - "client/src/pages/Settings.tsx"
+      - "client/src/index.css"
+  # Allow manual run from the GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      run_visual:
+        description: "Run Playwright visual screenshot test?"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # JOB 1: TypeScript type check
+  # ─────────────────────────────────────────────────────────────
+  typecheck:
+    name: "TypeScript — noEmit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Run TypeScript compiler (no emit)
+        # tsc picks up tsconfig.json at root; it covers client/src
+        run: npx tsc --noEmit
+        env:
+          # Suppress Vite-specific env var requirements during type check
+          NODE_ENV: test
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2: ESLint
+  # ─────────────────────────────────────────────────────────────
+  lint:
+    name: "ESLint — changed files"
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: typecheck
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Lint SettingsDock component
+        run: |
+          npx eslint \
+            client/src/components/settings/SettingsDock.tsx \
+            client/src/pages/Settings.tsx \
+            --max-warnings 0 \
+            --format=stylish
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 3: Vite production build
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: "Vite — production build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Write minimal .env for build
+        # Provide only the vars that Vite needs at build time.
+        # Runtime-only vars (DATABASE_URL etc.) are NOT needed here.
+        run: |
+          cat > .env << 'EOF'
+          NODE_ENV=production
+          EOF
+
+      - name: Build client (Vite)
+        run: npm run build --workspace=client 2>&1 || npx vite build
+        env:
+          NODE_ENV: production
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 4: Visual regression (Playwright) — manual trigger only
+  # ─────────────────────────────────────────────────────────────
+  visual:
+    name: "Playwright — settings dock screenshot"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+    # Only runs when manually triggered with run_visual=true
+    if: ${{ github.event.inputs.run_visual == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Write .env for dev server
+        run: |
+          cat > .env << 'EOF'
+          NODE_ENV=test
+          DATABASE_URL=postgresql://test:test@localhost:5432/test
+          SESSION_SECRET=test-secret-for-ci
+          EOF
+
+      - name: Create Playwright test for SettingsDock
+        # Inline the test so no separate test file is needed in the repo
+        run: |
+          mkdir -p tests/visual
+          cat > tests/visual/settings-dock.spec.ts << 'SPEC'
+          import { test, expect } from '@playwright/test';
+
+          test.describe('SettingsDock', () => {
+            test.beforeEach(async ({ page }) => {
+              // Mock auth so Settings page is accessible
+              await page.route('**/api/user', route =>
+                route.fulfill({ json: { id: 1, username: 'ci-user', role: 'user' } })
+              );
+              await page.route('**/api/pat', route =>
+                route.fulfill({ json: [] })
+              );
+              await page.route('**/api/categories**', route =>
+                route.fulfill({ json: [] })
+              );
+              await page.goto('/settings');
+              await page.waitForSelector('.settings-dock', { timeout: 10000 });
+            });
+
+            test('pill is visible and positioned on active tab', async ({ page }) => {
+              const pill = page.locator('.settings-dock__pill');
+              await expect(pill).toBeVisible();
+              const pillBox = await pill.boundingBox();
+              expect(pillBox?.width).toBeGreaterThan(60);
+            });
+
+            test('clicking a tab moves the pill', async ({ page }) => {
+              const pill = page.locator('.settings-dock__pill');
+              const initialBox = await pill.boundingBox();
+
+              // Click the second tab (Отображение)
+              await page.locator('.settings-dock__item:nth-child(2)').click();
+              await page.waitForTimeout(400); // wait for animation
+
+              const newBox = await pill.boundingBox();
+              expect(newBox?.x).not.toEqual(initialBox?.x);
+            });
+
+            test('active label is visible, inactive labels are hidden', async ({ page }) => {
+              // First tab (Категории) is active by default — its label should be visible
+              const activeLabel = page.locator('.settings-dock__item.is-active .settings-dock__label');
+              await expect(activeLabel).toBeVisible();
+
+              // Second tab label should be hidden (opacity 0 / max-width 0)
+              const inactiveLabel = page.locator('.settings-dock__item:nth-child(2) .settings-dock__label');
+              const opacity = await inactiveLabel.evaluate(el =>
+                parseFloat(window.getComputedStyle(el).opacity)
+              );
+              expect(opacity).toBeLessThan(0.1);
+            });
+
+            test('screenshot — initial state (Категории active)', async ({ page }) => {
+              await expect(page.locator('.settings-dock')).toHaveScreenshot(
+                'settings-dock-categories.png',
+                { maxDiffPixels: 100 }
+              );
+            });
+
+            test('screenshot — after clicking Отображение', async ({ page }) => {
+              await page.locator('.settings-dock__item:nth-child(2)').click();
+              await page.waitForTimeout(400);
+              await expect(page.locator('.settings-dock')).toHaveScreenshot(
+                'settings-dock-display.png',
+                { maxDiffPixels: 100 }
+              );
+            });
+          });
+          SPEC
+
+      - name: Write Playwright config
+        run: |
+          cat > playwright.config.ts << 'CFG'
+          import { defineConfig } from '@playwright/test';
+          export default defineConfig({
+            testDir: './tests/visual',
+            use: {
+              baseURL: 'http://localhost:5173',
+              screenshot: 'only-on-failure',
+              video: 'off',
+            },
+            webServer: {
+              command: 'npx vite --port 5173',
+              url: 'http://localhost:5173',
+              reuseExistingServer: false,
+              timeout: 60000,
+            },
+          });
+          CFG
+
+      - name: Run Playwright visual tests
+        run: npx playwright test tests/visual/settings-dock.spec.ts
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
