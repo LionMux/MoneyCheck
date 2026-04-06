@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* SettingsDock animated tab bar */
+@import './styles/settings-dock.css';
+
 @layer base {
   :root {
     /* Finance theme: deep navy + emerald green accent */

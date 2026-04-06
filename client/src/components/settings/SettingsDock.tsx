@@ -1,9 +1,10 @@
 import { useRef, useEffect, useCallback } from "react";
+import type { ReactNode } from "react";
 
 export interface SettingsDockTab {
   id: string;
   label: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }
 
 interface SettingsDockProps {

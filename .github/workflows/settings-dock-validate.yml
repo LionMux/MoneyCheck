@@ -28,7 +28,6 @@ on:
       - "client/src/styles/settings-dock.css"
       - "client/src/pages/Settings.tsx"
       - "client/src/index.css"
-  # Allow manual run from the GitHub Actions tab
   workflow_dispatch:
     inputs:
       run_visual:
@@ -67,10 +66,9 @@ jobs:
         run: npm ci --prefer-offline
 
       - name: Run TypeScript compiler (no emit)
-        # tsc picks up tsconfig.json at root; it covers client/src
-        run: npx tsc --noEmit
+        # tsconfig.json at root covers client/src/**/* — correct
+        run: npx tsc --noEmit --project tsconfig.json
         env:
-          # Suppress Vite-specific env var requirements during type check
           NODE_ENV: test
 
   # ─────────────────────────────────────────────────────────────
@@ -126,15 +124,16 @@ jobs:
         run: npm ci --prefer-offline
 
       - name: Write minimal .env for build
-        # Provide only the vars that Vite needs at build time.
-        # Runtime-only vars (DATABASE_URL etc.) are NOT needed here.
+        # Only build-time vars needed; DATABASE_URL etc. are runtime-only
         run: |
           cat > .env << 'EOF'
           NODE_ENV=production
           EOF
 
-      - name: Build client (Vite)
-        run: npm run build --workspace=client 2>&1 || npx vite build
+      - name: Build (tsx script/build.ts — same as npm run build)
+        # FIX: was `npm run build --workspace=client` — no workspaces in this repo.
+        # The root build script (tsx script/build.ts) runs Vite for the client.
+        run: npm run build
         env:
           NODE_ENV: production
 
@@ -142,6 +141,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: client-dist-${{ github.sha }}
+          # FIX: tsx script/build.ts outputs to dist/public (Vite outDir)
           path: dist/
           retention-days: 7
           if-no-files-found: warn
@@ -154,7 +154,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: build
-    # Only runs when manually triggered with run_visual=true
     if: ${{ github.event.inputs.run_visual == 'true' }}
 
     steps:
@@ -182,7 +181,6 @@ jobs:
           EOF
 
       - name: Create Playwright test for SettingsDock
-        # Inline the test so no separate test file is needed in the repo
         run: |
           mkdir -p tests/visual
           cat > tests/visual/settings-dock.spec.ts << 'SPEC'
@@ -190,7 +188,6 @@ jobs:
 
           test.describe('SettingsDock', () => {
             test.beforeEach(async ({ page }) => {
-              // Mock auth so Settings page is accessible
               await page.route('**/api/user', route =>
                 route.fulfill({ json: { id: 1, username: 'ci-user', role: 'user' } })
               );
@@ -215,20 +212,21 @@ jobs:
               const pill = page.locator('.settings-dock__pill');
               const initialBox = await pill.boundingBox();
 
-              // Click the second tab (Отображение)
               await page.locator('.settings-dock__item:nth-child(2)').click();
-              await page.waitForTimeout(400); // wait for animation
+
+              // FIX: wait for stable class state instead of arbitrary timeout
+              await expect(
+                page.locator('.settings-dock__item:nth-child(2)')
+              ).toHaveClass(/is-active/);
 
               const newBox = await pill.boundingBox();
               expect(newBox?.x).not.toEqual(initialBox?.x);
             });
 
             test('active label is visible, inactive labels are hidden', async ({ page }) => {
-              // First tab (Категории) is active by default — its label should be visible
               const activeLabel = page.locator('.settings-dock__item.is-active .settings-dock__label');
               await expect(activeLabel).toBeVisible();
 
-              // Second tab label should be hidden (opacity 0 / max-width 0)
               const inactiveLabel = page.locator('.settings-dock__item:nth-child(2) .settings-dock__label');
               const opacity = await inactiveLabel.evaluate(el =>
                 parseFloat(window.getComputedStyle(el).opacity)
@@ -245,7 +243,9 @@ jobs:
 
             test('screenshot — after clicking Отображение', async ({ page }) => {
               await page.locator('.settings-dock__item:nth-child(2)').click();
-              await page.waitForTimeout(400);
+              await expect(
+                page.locator('.settings-dock__item:nth-child(2)')
+              ).toHaveClass(/is-active/);
               await expect(page.locator('.settings-dock')).toHaveScreenshot(
                 'settings-dock-display.png',
                 { maxDiffPixels: 100 }
