@@ -67,30 +67,14 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-      - name: 🔑 Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            set -e
-            cd ~/MoneyCheck
-
-            echo "📥 Pulling latest changes..."
-            git pull origin main
-
-            echo "📦 Installing dependencies..."
-            npm install --legacy-peer-deps
-
-            echo "🔨 Building project..."
-            npm run build
-
-            echo "♻️  Restarting PM2 process..."
-            pm2 restart moneycheck
-
-            echo "✅ Deploy complete!"
+      - name: Deploy via Webhook
+        run: |
+          RESPONSE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            -X POST https://myfinwise.duckdns.org/api/deploy \
+            -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}")
+          echo "HTTP: $RESPONSE"
+          cat /tmp/resp.json
+          [ "$RESPONSE" = "200" ] || exit 1
 
   # ─────────────────────────────────────────
   # JOB 3: Уведомление о результате
