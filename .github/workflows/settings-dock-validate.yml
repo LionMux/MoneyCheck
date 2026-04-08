@@ -1,0 +1,141 @@
+# GitHub Actions Pipeline: Settings Dock Tab Bar
+# ================================================
+# Runs on every push / PR that touches the settings tab-bar files.
+# Jobs:
+#   1. typecheck  - tsc --noEmit to catch type errors
+#   2. build      - Vite production build to catch bundler errors
+#   3. visual     - (manual trigger) Playwright screenshot diff
+
+name: "Settings Dock — Validate"
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+    paths:
+      - "client/src/components/settings/SettingsDock.tsx"
+      - "client/src/styles/settings-dock.css"
+      - "client/src/pages/Settings.tsx"
+      - "client/src/index.css"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "client/src/components/settings/SettingsDock.tsx"
+      - "client/src/styles/settings-dock.css"
+      - "client/src/pages/Settings.tsx"
+      - "client/src/index.css"
+  workflow_dispatch:
+    inputs:
+      run_visual:
+        description: "Run Playwright visual screenshot test?"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # JOB 1: TypeScript type check
+  # ─────────────────────────────────────────────────────────────
+  typecheck:
+    name: "TypeScript — noEmit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run TypeScript compiler (no emit)
+        run: npx tsc --noEmit --project tsconfig.json
+        env:
+          NODE_ENV: test
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2: Vite production build
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: "Vite — production build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: typecheck
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Write minimal .env for build
+        run: |
+          cat > .env << 'EOF'
+          NODE_ENV=production
+          EOF
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: production
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 3: Visual regression (Playwright) - manual trigger only
+  # ─────────────────────────────────────────────────────────────
+  visual:
+    name: "Playwright — settings dock screenshot"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+    if: ${{ github.event.inputs.run_visual == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Write .env for dev server
+        run: |
+          cat > .env << 'EOF'
+          NODE_ENV=test
+          DATABASE_URL=postgresql://test:test@localhost:5432/test
+          SESSION_SECRET=test-secret-for-ci
+          EOF
+      - name: Run Playwright visual tests
+        run: npx playwright test tests/visual/settings-dock.spec.ts
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

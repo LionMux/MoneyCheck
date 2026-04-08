@@ -11,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogDescription
@@ -23,6 +22,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import CategoryManager from "@/components/CategoryManager";
 import { cn } from "@/lib/utils";
+import { SettingsDock, type SettingsDockTab } from "@/components/settings/SettingsDock";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab definitions — to add a new settings tab, just append an item here.
+// No changes to SettingsDock component required.
+// ─────────────────────────────────────────────────────────────────────────────
+const SETTINGS_TABS: SettingsDockTab[] = [
+  { id: "categories",  label: "Категории",    icon: <LayoutGrid size={18} /> },
+  { id: "display",     label: "Отображение",  icon: <Eye       size={18} /> },
+  { id: "tokens",      label: "API-токены",   icon: <Key       size={18} /> },
+  { id: "shortcuts",   label: "Виджеты",      icon: <Smartphone size={18} /> },
+];
 
 interface PAT {
   id: number;
@@ -231,6 +242,7 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  const [activeTab, setActiveTab] = useState<string>("categories");
   const [createOpen, setCreateOpen] = useState(false);
   const [tokenName, setTokenName] = useState("");
   const [newToken, setNewToken] = useState<string | null>(null);
@@ -286,28 +298,16 @@ export default function SettingsPage() {
         <p className="text-muted-foreground text-sm mt-1">Управление аккаунтом и интеграциями</p>
       </div>
 
-      <Tabs defaultValue="categories">
-        <TabsList className="w-full">
-          <TabsTrigger value="categories" className="flex-1 gap-2">
-            <LayoutGrid size={15} />
-            Категории
-          </TabsTrigger>
-          <TabsTrigger value="display" className="flex-1 gap-2">
-            <Eye size={15} />
-            Отображение
-          </TabsTrigger>
-          <TabsTrigger value="tokens" className="flex-1 gap-2">
-            <Key size={15} />
-            API-токены
-          </TabsTrigger>
-          <TabsTrigger value="shortcuts" className="flex-1 gap-2">
-            <Smartphone size={15} />
-            Виджеты
-          </TabsTrigger>
-        </TabsList>
+      {/* ── Animated dock tab bar ── */}
+      <SettingsDock
+        tabs={SETTINGS_TABS}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
 
-        {/* ── TAB: CATEGORIES ── */}
-        <TabsContent value="categories" className="mt-6 space-y-4">
+      {/* ── TAB: CATEGORIES ── */}
+      {activeTab === "categories" && (
+        <div className="space-y-4">
           <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground">
             <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
             <span>
@@ -316,15 +316,17 @@ export default function SettingsPage() {
             </span>
           </div>
           <CategoryManager />
-        </TabsContent>
+        </div>
+      )}
 
-        {/* ── TAB: DISPLAY ── */}
-        <TabsContent value="display" className="mt-6">
-          <DisplayPreferences />
-        </TabsContent>
+      {/* ── TAB: DISPLAY ── */}
+      {activeTab === "display" && (
+        <DisplayPreferences />
+      )}
 
-        {/* ── TAB: API TOKENS ── */}
-        <TabsContent value="tokens" className="mt-6 space-y-4">
+      {/* ── TAB: API TOKENS ── */}
+      {activeTab === "tokens" && (
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="rounded-lg border border-border bg-muted/30 p-3.5 flex gap-2.5 text-sm text-muted-foreground flex-1 mr-3">
               <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
@@ -381,11 +383,12 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
-        </TabsContent>
+        </div>
+      )}
 
-        {/* ── TAB: SHORTCUTS / ВИДЖЕТЫ ── */}
-        <TabsContent value="shortcuts" className="mt-6 space-y-5">
-
+      {/* ── TAB: SHORTCUTS / ВИДЖЕТЫ ── */}
+      {activeTab === "shortcuts" && (
+        <div className="space-y-5">
           <div className="space-y-2">
             {[
               { n: "1", text: "Перейдите во вкладку «API-токены» и создайте токен", sub: "Нужен для авторизации в Shortcuts" },
@@ -408,9 +411,8 @@ export default function SettingsPage() {
             <ShortcutCard type="rashod" onDownload={() => handleDownloadShortcut("rashod")} />
             <ShortcutCard type="dohod" onDownload={() => handleDownloadShortcut("dohod")} />
           </div>
-
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       {/* DIALOG: CREATE TOKEN */}
       <Dialog open={createOpen} onOpenChange={(o) => { if (!o) handleCloseNewToken(); }}>
