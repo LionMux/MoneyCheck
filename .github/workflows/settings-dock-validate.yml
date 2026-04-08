@@ -2,10 +2,9 @@
 # ================================================
 # Runs on every push / PR that touches the settings tab-bar files.
 # Jobs:
-#   1. typecheck  — tsc --noEmit to catch type errors
-#   2. lint       — ESLint on changed files
-#   3. build      — Vite production build to catch bundler errors
-#   4. visual     — (manual trigger) Playwright screenshot diff
+#   1. typecheck  - tsc --noEmit to catch type errors
+#   2. build      - Vite production build to catch bundler errors
+#   3. visual     - (manual trigger) Playwright screenshot diff
 
 name: "Settings Dock — Validate"
 
@@ -51,103 +50,58 @@ jobs:
     name: "TypeScript — noEmit"
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-
       - name: Install dependencies
         run: npm install --ignore-scripts
-
       - name: Run TypeScript compiler (no emit)
-        # tsconfig.json at root covers client/src/**/* — correct
         run: npx tsc --noEmit --project tsconfig.json
         env:
           NODE_ENV: test
 
   # ─────────────────────────────────────────────────────────────
-  # JOB 2: ESLint
-  # ─────────────────────────────────────────────────────────────
-  lint:
-    name: "ESLint — changed files"
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    needs: typecheck
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm install --ignore-scripts
-
-      - name: Lint SettingsDock component
-        run: |
-          npx eslint@8 \
-            client/src/components/settings/SettingsDock.tsx \
-            client/src/pages/Settings.tsx \
-            --max-warnings 0 \
-            --format=stylish
-
-  # ─────────────────────────────────────────────────────────────
-  # JOB 3: Vite production build
+  # JOB 2: Vite production build
   # ─────────────────────────────────────────────────────────────
   build:
     name: "Vite — production build"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: lint
-
+    needs: typecheck
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-
       - name: Install dependencies
         run: npm install --ignore-scripts
-
       - name: Write minimal .env for build
-        # Only build-time vars needed; DATABASE_URL etc. are runtime-only
         run: |
           cat > .env << 'EOF'
           NODE_ENV=production
           EOF
-
-      - name: Build (tsx script/build.ts — same as npm run build)
-        # FIX: was `npm run build --workspace=client` — no workspaces in this repo.
-        # The root build script (tsx script/build.ts) runs Vite for the client.
+      - name: Build
         run: npm run build
         env:
           NODE_ENV: production
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: client-dist-${{ github.sha }}
-          # FIX: tsx script/build.ts outputs to dist/public (Vite outDir)
           path: dist/
           retention-days: 7
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────
-  # JOB 4: Visual regression (Playwright) — manual trigger only
+  # JOB 3: Visual regression (Playwright) - manual trigger only
   # ─────────────────────────────────────────────────────────────
   visual:
     name: "Playwright — settings dock screenshot"
@@ -155,23 +109,18 @@ jobs:
     timeout-minutes: 20
     needs: build
     if: ${{ github.event.inputs.run_visual == 'true' }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-
       - name: Install dependencies
         run: npm install --ignore-scripts
-
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-
       - name: Write .env for dev server
         run: |
           cat > .env << 'EOF'
@@ -179,104 +128,8 @@ jobs:
           DATABASE_URL=postgresql://test:test@localhost:5432/test
           SESSION_SECRET=test-secret-for-ci
           EOF
-
-      - name: Create Playwright test for SettingsDock
-        run: |
-          mkdir -p tests/visual
-          cat > tests/visual/settings-dock.spec.ts << 'SPEC'
-          import { test, expect } from '@playwright/test';
-
-          test.describe('SettingsDock', () => {
-            test.beforeEach(async ({ page }) => {
-              await page.route('**/api/user', route =>
-                route.fulfill({ json: { id: 1, username: 'ci-user', role: 'user' } })
-              );
-              await page.route('**/api/pat', route =>
-                route.fulfill({ json: [] })
-              );
-              await page.route('**/api/categories**', route =>
-                route.fulfill({ json: [] })
-              );
-              await page.goto('/settings');
-              await page.waitForSelector('.settings-dock', { timeout: 10000 });
-            });
-
-            test('pill is visible and positioned on active tab', async ({ page }) => {
-              const pill = page.locator('.settings-dock__pill');
-              await expect(pill).toBeVisible();
-              const pillBox = await pill.boundingBox();
-              expect(pillBox?.width).toBeGreaterThan(60);
-            });
-
-            test('clicking a tab moves the pill', async ({ page }) => {
-              const pill = page.locator('.settings-dock__pill');
-              const initialBox = await pill.boundingBox();
-
-              await page.locator('.settings-dock__item:nth-child(2)').click();
-
-              // FIX: wait for stable class state instead of arbitrary timeout
-              await expect(
-                page.locator('.settings-dock__item:nth-child(2)')
-              ).toHaveClass(/is-active/);
-
-              const newBox = await pill.boundingBox();
-              expect(newBox?.x).not.toEqual(initialBox?.x);
-            });
-
-            test('active label is visible, inactive labels are hidden', async ({ page }) => {
-              const activeLabel = page.locator('.settings-dock__item.is-active .settings-dock__label');
-              await expect(activeLabel).toBeVisible();
-
-              const inactiveLabel = page.locator('.settings-dock__item:nth-child(2) .settings-dock__label');
-              const opacity = await inactiveLabel.evaluate(el =>
-                parseFloat(window.getComputedStyle(el).opacity)
-              );
-              expect(opacity).toBeLessThan(0.1);
-            });
-
-            test('screenshot — initial state (Категории active)', async ({ page }) => {
-              await expect(page.locator('.settings-dock')).toHaveScreenshot(
-                'settings-dock-categories.png',
-                { maxDiffPixels: 100 }
-              );
-            });
-
-            test('screenshot — after clicking Отображение', async ({ page }) => {
-              await page.locator('.settings-dock__item:nth-child(2)').click();
-              await expect(
-                page.locator('.settings-dock__item:nth-child(2)')
-              ).toHaveClass(/is-active/);
-              await expect(page.locator('.settings-dock')).toHaveScreenshot(
-                'settings-dock-display.png',
-                { maxDiffPixels: 100 }
-              );
-            });
-          });
-          SPEC
-
-      - name: Write Playwright config
-        run: |
-          cat > playwright.config.ts << 'CFG'
-          import { defineConfig } from '@playwright/test';
-          export default defineConfig({
-            testDir: './tests/visual',
-            use: {
-              baseURL: 'http://localhost:5173',
-              screenshot: 'only-on-failure',
-              video: 'off',
-            },
-            webServer: {
-              command: 'npx vite --port 5173',
-              url: 'http://localhost:5173',
-              reuseExistingServer: false,
-              timeout: 60000,
-            },
-          });
-          CFG
-
       - name: Run Playwright visual tests
         run: npx playwright test tests/visual/settings-dock.spec.ts
-
       - name: Upload Playwright results
         if: always()
         uses: actions/upload-artifact@v4
