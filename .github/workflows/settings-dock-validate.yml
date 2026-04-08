@@ -95,7 +95,7 @@ jobs:
 
       - name: Lint SettingsDock component
         run: |
-          npx eslint \
+          npx eslint@8 \
             client/src/components/settings/SettingsDock.tsx \
             client/src/pages/Settings.tsx \
             --max-warnings 0 \
