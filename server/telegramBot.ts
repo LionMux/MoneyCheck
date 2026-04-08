@@ -28,7 +28,7 @@ const db = drizzle(pool);
 const proxyAgent = new HttpsProxyAgent('http://127.0.0.1:12334');
 const bot = new TelegramBot(BOT_TOKEN, {
   polling: true,
-  request: { agent: proxyAgent }
+  request: { agent: proxyAgent as any }
 });
 
 function isAdmin(chatId: number): boolean {
