@@ -63,7 +63,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --prefer-offline
+        run: npm install --ignore-scripts
 
       - name: Run TypeScript compiler (no emit)
         # tsconfig.json at root covers client/src/**/* — correct
@@ -91,7 +91,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --prefer-offline
+        run: npm install --ignore-scripts
 
       - name: Lint SettingsDock component
         run: |
@@ -121,7 +121,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --prefer-offline
+        run: npm install --ignore-scripts
 
       - name: Write minimal .env for build
         # Only build-time vars needed; DATABASE_URL etc. are runtime-only
@@ -167,7 +167,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --prefer-offline
+        run: npm install --ignore-scripts
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
