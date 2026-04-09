@@ -12,8 +12,10 @@ import { cn } from "@/lib/utils";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
+import { BottomNav } from "@/components/BottomNav";
+import type { BottomNavItem } from "@/components/BottomNav";
 
-interface NavItem {
+export interface NavItem {
   href: string;
   label: string;
   icon: React.ReactNode;
@@ -21,17 +23,23 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: "/",             label: "Дашборд",     icon: <LayoutDashboard size={18} />, testId: "nav-dashboard" },
-  { href: "/transactions", label: "Операции",    icon: <ArrowLeftRight size={18} />,  testId: "nav-transactions" },
-  { href: "/accounts",    label: "Счета",        icon: <Wallet size={18} />,          testId: "nav-accounts" },
-  { href: "/budget",      label: "Бюджет",       icon: <PieChart size={18} />,        testId: "nav-budget" },
-  { href: "/goals",       label: "Цели",         icon: <Target size={18} />,          testId: "nav-goals" },
-  { href: "/learn",       label: "Обучение",     icon: <BookOpen size={18} />,        testId: "nav-learn" },
-  { href: "/notifications",label: "Уведомления", icon: <Bell size={18} />,            testId: "nav-notifications" },
-  { href: "/settings",   label: "Настройки",    icon: <Settings2 size={18} />,       testId: "nav-settings" },
+  { href: "/",              label: "Дашборд",      icon: <LayoutDashboard size={18} />, testId: "nav-dashboard" },
+  { href: "/transactions",  label: "Операции",     icon: <ArrowLeftRight size={18} />,  testId: "nav-transactions" },
+  { href: "/accounts",     label: "Счета",         icon: <Wallet size={18} />,          testId: "nav-accounts" },
+  { href: "/budget",       label: "Бюджет",        icon: <PieChart size={18} />,        testId: "nav-budget" },
+  { href: "/goals",        label: "Цели",          icon: <Target size={18} />,          testId: "nav-goals" },
+  { href: "/learn",        label: "Обучение",      icon: <BookOpen size={18} />,        testId: "nav-learn" },
+  { href: "/notifications", label: "Уведомления", icon: <Bell size={18} />,            testId: "nav-notifications" },
+  { href: "/settings",    label: "Настройки",     icon: <Settings2 size={18} />,       testId: "nav-settings" },
 ];
 
-const mobileNavItems = navItems.slice(0, 5);
+// Bottom 5 tabs shown on mobile
+const mobileNavItems: BottomNavItem[] = navItems.slice(0, 5).map(item => ({
+  href: item.href,
+  label: item.label,
+  icon: item.icon,
+  testId: item.testId,
+}));
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useHashLocation();
@@ -58,6 +66,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const isActive = (href: string) =>
     location === href || (href === "/" && (location === "" || location === "/"));
+
+  // Resolve active href for BottomNav (handles root "/" edge case)
+  const activeHref = location === "" ? "/" : location;
 
   const SidebarContent = () => (
     <>
@@ -176,7 +187,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* MAIN */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Mobile header — pt учитывает статус-бар iPhone (safe-area-inset-top) */}
+        {/* Mobile header */}
         <header
           className="md:hidden flex items-center gap-3 px-4 pb-3 bg-background border-b border-border flex-shrink-0"
           style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
@@ -207,43 +218,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto bg-background pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
+        {/* Page content — bottom padding accounts for BottomNav height */}
+        <main className="flex-1 overflow-y-auto bg-background pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0">
           <div className="p-4 md:p-6 max-w-5xl mx-auto">
             {children}
           </div>
         </main>
       </div>
 
-      {/* MOBILE BOTTOM NAV */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div className="flex justify-around py-1 px-1">
-          {mobileNavItems.map((item) => (
-            <Link key={item.href} href={item.href}>
-              <a
-                data-testid={item.testId}
-                className={cn(
-                  "flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-colors min-w-[52px]",
-                  isActive(item.href) ? "text-primary" : "text-muted-foreground"
-                )}
-              >
-                <span className="relative">
-                  {item.icon}
-                  {item.href === "/notifications" && unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive text-destructive-foreground text-[8px] rounded-full flex items-center justify-center">
-                      {unreadCount}
-                    </span>
-                  )}
-                </span>
-                <span className="text-[10px] leading-tight font-medium">{item.label}</span>
-              </a>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      {/* MOBILE BOTTOM NAV — animated pill */}
+      <div className="md:hidden">
+        <BottomNav
+          items={mobileNavItems}
+          activeHref={activeHref}
+          badge={(href) => href === "/notifications" ? unreadCount : 0}
+        />
+      </div>
 
     </div>
   );

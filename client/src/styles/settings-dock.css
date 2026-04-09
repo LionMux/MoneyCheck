@@ -1,18 +1,18 @@
 /*
-  SettingsDock — shared active pill tab bar
-  =========================================
+  SettingsDock — shared active pill tab bar (v3)
+  ==============================================
   Imported via client/src/index.css:
     @import './styles/settings-dock.css';
 
-  HOW IT WORKS (v2):
-  - One absolutely-positioned .settings-dock__pill slides between buttons
+  HOW IT WORKS:
+  - One absolutely-positioned .settings-dock__pill slides between buttons.
   - JS measures offsetLeft + offsetWidth of the active button and sets
-    inline styles. It also re-measures after the label transition ends
-    so the pill width tracks the fully-expanded label, not the collapsed one.
+    inline styles. Runs immediately on tab change AND after the active
+    button's label grid transition ends (pass-2, v2 bug fixed in v3).
   - Label reveal: grid 0fr→1fr column trick — reflow-free, GPU-friendly,
-    no max-width cap needed. Text is always white-space:nowrap so it
-    never wraps; the pill just grows to fit.
-  - overflow:visible + clip-path on container so buttons are never clipped.
+    no max-width cap needed.
+  - overflow:visible + clip-path so buttons are never clipped.
+  - Pill initial transform is translate(0px, -50%) — JS writes the X offset.
   - prefers-reduced-motion: all transitions removed.
 */
 
@@ -50,7 +50,6 @@
   color: hsl(var(--muted-foreground));
   border-radius: 9999px;
   display: inline-grid;
-  /* icon always visible; label column collapses to 0 when inactive */
   grid-template-columns: 20px 0fr;
   align-items: center;
   gap: 0;
@@ -58,19 +57,17 @@
   cursor: pointer;
   flex: 1;
   transition:
-    color     220ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    grid-template-columns 300ms cubic-bezier(0.16, 1, 0.3, 1),
-    padding   300ms cubic-bezier(0.16, 1, 0.3, 1);
+    color                  220ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform              220ms cubic-bezier(0.16, 1, 0.3, 1),
+    grid-template-columns  300ms cubic-bezier(0.16, 1, 0.3, 1),
+    padding                300ms cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
   min-width: 44px;
   min-height: 44px;
-  /* Prevent the grid from overflowing the button bounds */
   overflow: hidden;
 }
 
 .settings-dock__item.is-active {
-  /* Expand label column fully + add gap between icon and text */
   grid-template-columns: 20px 1fr;
   gap: 7px;
   color: #151515;
@@ -95,7 +92,6 @@
   height: 20px;
   display: inline-grid;
   place-items: center;
-  /* Stays in its column; no transition needed */
 }
 
 @media (min-width: 768px) {
@@ -107,14 +103,12 @@
 
 /* ── Label text ── */
 .settings-dock__label {
-  /* Grid column controls the space; overflow hides during collapse */
   overflow: hidden;
   opacity: 0;
   font-size: 0.875rem;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
-  /* Fade in slightly after column opens */
   transition: opacity 180ms ease 80ms;
 }
 
@@ -144,6 +138,10 @@
 }
 
 /* ── The sliding pill ── */
+/* IMPORTANT: initial transform is translate(0px, -50%).
+   JS overwrites the X value via inline style.
+   Do NOT hardcode a fixed X offset here — JS measures offsetLeft.
+*/
 .settings-dock__pill {
   position: absolute;
   left: 0;
@@ -151,7 +149,7 @@
   height: 46px;
   background: #ffffff;
   border-radius: 9999px;
-  transform: translate(8px, -50%);
+  transform: translate(0px, -50%);
   transition:
     transform  320ms cubic-bezier(0.16, 1, 0.3, 1),
     width      320ms cubic-bezier(0.16, 1, 0.3, 1),

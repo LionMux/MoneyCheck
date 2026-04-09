@@ -1,5 +1,6 @@
-/* SettingsDock animated tab bar — MUST be first, before @tailwind directives */
+/* SettingsDock + BottomNav animated tab bars — MUST be before @tailwind */
 @import './styles/settings-dock.css';
+@import './styles/bottom-nav.css';
 
 @tailwind base;
 @tailwind components;

@@ -15,15 +15,17 @@ interface SettingsDockProps {
 }
 
 /**
- * SettingsDock — animated pill/dock tab switcher (v2).
+ * SettingsDock — animated pill/dock tab switcher (v3).
  *
  * CSS grid 0fr→1fr column transition expands the label column
  * without max-width caps. The pill is measured TWICE:
  *   1. Immediately on tab change (fast snap to new position).
- *   2. After the grid transition ends (pill grows to fit full label).
+ *   2. After the ACTIVE button's grid transition ends so pill width
+ *      matches the fully-revealed label, never the mid-animation state.
  *
- * This two-pass approach ensures the pill width always matches
- * the fully-revealed label, never the collapsed mid-animation state.
+ * Fix vs v2: transitionend now filters by (target.dataset.tab === activeTab)
+ * to avoid reacting to the outgoing tab's collapse transition, which
+ * previously caused the pill to jitter on fast clicks.
  */
 export function SettingsDock({
   tabs,
@@ -55,22 +57,25 @@ export function SettingsDock({
     syncToActive();
   }, [syncToActive]);
 
-  // Pass 2: re-sync after the grid column transition finishes
-  // so pill width matches the fully-expanded label
+  // Pass 2: re-sync ONLY after the ACTIVE button's label finishes expanding.
+  // Filtering by dataset.tab === activeTab prevents reacting to the outgoing
+  // tab's collapse, which caused jitter on rapid clicks (v2 bug).
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
 
     const handleTransitionEnd = (e: TransitionEvent) => {
-      // Only react to the grid-template-columns transition on the active button
-      if (e.propertyName === "grid-template-columns") {
+      if (e.propertyName !== "grid-template-columns") return;
+      const target = e.target as HTMLElement;
+      // Only react when the currently-active button finishes opening
+      if (target.dataset.tab === activeTab) {
         syncToActive();
       }
     };
 
     nav.addEventListener("transitionend", handleTransitionEnd);
     return () => nav.removeEventListener("transitionend", handleTransitionEnd);
-  }, [syncToActive]);
+  }, [activeTab, syncToActive]);
 
   // Re-sync on window resize
   useEffect(() => {
