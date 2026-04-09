@@ -4,19 +4,16 @@
   Imported via client/src/index.css:
     @import './styles/settings-dock.css';
 
-  HOW IT WORKS:
-  - One absolutely-positioned .settings-dock__pill sits behind all buttons (z-index 1)
-  - JS measures offsetLeft + offsetWidth of the active button and sets inline styles
-  - The pill slides via transform + width transition (GPU-accelerated, no layout thrashing)
-  - Labels use max-width + opacity + translateX for smooth reveal without reflow
-  - overflow:visible + clip-path keeps the pill inside the rounded bar without clipping buttons
-  - prefers-reduced-motion: all transitions disabled
-
-  FIXES (2026-04-09):
-  - Mobile: max-width was 120px — truncated labels like "Уведомления".
-    Now uses 160px so every label fully reveals on mobile.
-  - Desktop: dock was too tall (68px container, 46px pill).
-    Responsive sizing: compact on md+ (48px/36px), full on mobile (64px/46px).
+  HOW IT WORKS (v2):
+  - One absolutely-positioned .settings-dock__pill slides between buttons
+  - JS measures offsetLeft + offsetWidth of the active button and sets
+    inline styles. It also re-measures after the label transition ends
+    so the pill width tracks the fully-expanded label, not the collapsed one.
+  - Label reveal: grid 0fr→1fr column trick — reflow-free, GPU-friendly,
+    no max-width cap needed. Text is always white-space:nowrap so it
+    never wraps; the pill just grows to fit.
+  - overflow:visible + clip-path on container so buttons are never clipped.
+  - prefers-reduced-motion: all transitions removed.
 */
 
 /* ── Container ── */
@@ -25,7 +22,6 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  /* Mobile: full height for comfortable touch targets */
   height: 64px;
   padding: 8px;
   background: hsl(var(--muted));
@@ -36,7 +32,6 @@
   clip-path: inset(0 round 9999px);
 }
 
-/* Desktop: more compact */
 @media (min-width: 768px) {
   .settings-dock {
     height: 48px;
@@ -49,124 +44,91 @@
 .settings-dock__item {
   position: relative;
   z-index: 2;
-  /* Mobile: tall pill for thumb comfort */
   height: 46px;
   border: 0;
   background: transparent;
   color: hsl(var(--muted-foreground));
   border-radius: 9999px;
-  display: inline-flex;
+  display: inline-grid;
+  /* icon always visible; label column collapses to 0 when inactive */
+  grid-template-columns: 20px 0fr;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  gap: 0;
   padding: 0 14px;
   cursor: pointer;
   flex: 1;
   transition:
-    color 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
-  /* Allow wrapping for long labels on narrow screens */
-  white-space: normal;
+    color     220ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    grid-template-columns 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    padding   300ms cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
   min-width: 44px;
   min-height: 44px;
+  /* Prevent the grid from overflowing the button bounds */
+  overflow: hidden;
 }
 
-/* Desktop: shorter buttons */
+.settings-dock__item.is-active {
+  /* Expand label column fully + add gap between icon and text */
+  grid-template-columns: 20px 1fr;
+  gap: 7px;
+  color: #151515;
+}
+
 @media (min-width: 768px) {
   .settings-dock__item {
     height: 36px;
     padding: 0 12px;
-    gap: 5px;
     min-height: 36px;
-    /* Desktop labels are short enough to stay on one line */
-    white-space: nowrap;
+    grid-template-columns: 16px 0fr;
+  }
+  .settings-dock__item.is-active {
+    grid-template-columns: 16px 1fr;
+    gap: 6px;
   }
 }
 
-/* ── Icon inside each tab ── */
+/* ── Icon ── */
 .settings-dock__icon {
   width: 20px;
   height: 20px;
   display: inline-grid;
   place-items: center;
-  flex: 0 0 20px;
-  transition:
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity   220ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* Stays in its column; no transition needed */
 }
 
-/* Desktop: slightly smaller icons */
 @media (min-width: 768px) {
   .settings-dock__icon {
     width: 16px;
     height: 16px;
-    flex: 0 0 16px;
   }
 }
 
-/* ── Label text: hidden in inactive tabs ── */
+/* ── Label text ── */
 .settings-dock__label {
+  /* Grid column controls the space; overflow hides during collapse */
   overflow: hidden;
-  max-width: 0;
   opacity: 0;
-  transform: translateX(-4px);
-  font-size: 0.875rem; /* 14px */
+  font-size: 0.875rem;
   font-weight: 500;
-  /* Mobile: allow wrapping for long Russian words */
-  white-space: normal;
-  word-break: keep-all;
-  line-height: 1.2;
-  text-align: left;
-  transition:
-    max-width  280ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity    160ms ease,
-    transform  220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Desktop: single-line, slightly smaller */
-@media (min-width: 768px) {
-  .settings-dock__label {
-    font-size: 0.8125rem; /* 13px */
-    white-space: nowrap;
-    word-break: normal;
-    line-height: 1;
-  }
-}
-
-/* ── Active tab state ── */
-.settings-dock__item.is-active {
-  color: #151515;
+  line-height: 1;
+  white-space: nowrap;
+  /* Fade in slightly after column opens */
+  transition: opacity 180ms ease 80ms;
 }
 
 .settings-dock__item.is-active .settings-dock__label {
-  /*
-    FIX: was 120px — "API-токены" = ~96px OK, but on smaller screens
-    some labels were clipped. 160px gives ample room for all current
-    and future Russian tab labels without forcing a hard cap.
-  */
-  max-width: 160px;
   opacity: 1;
-  transform: translateX(0);
 }
 
 @media (min-width: 768px) {
-  .settings-dock__item.is-active .settings-dock__label {
-    max-width: 130px;
+  .settings-dock__label {
+    font-size: 0.8125rem;
   }
 }
 
-.settings-dock__item.is-active .settings-dock__icon {
-  transform: scale(1.05);
-}
-
-/* Desktop: skip icon scale (icons already smaller) */
-@media (min-width: 768px) {
-  .settings-dock__item.is-active .settings-dock__icon {
-    transform: none;
-  }
-}
-
-/* ── Hover / press micro-interactions ── */
+/* ── Hover / press ── */
 .settings-dock__item:hover {
   transform: translateY(-1px);
 }
@@ -175,7 +137,6 @@
   transform: translateY(0) scale(0.97);
 }
 
-/* Disable hover lift on real touch devices */
 @media (hover: none) {
   .settings-dock__item:hover {
     transform: none;
@@ -187,21 +148,19 @@
   position: absolute;
   left: 0;
   top: 50%;
-  /* Mobile: tall pill */
   height: 46px;
   background: #ffffff;
   border-radius: 9999px;
   transform: translate(8px, -50%);
   transition:
-    transform   320ms cubic-bezier(0.16, 1, 0.3, 1),
-    width       320ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow  220ms cubic-bezier(0.16, 1, 0.3, 1);
+    transform  320ms cubic-bezier(0.16, 1, 0.3, 1),
+    width      320ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 1;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
 
-/* Desktop: shorter pill to match compact container */
 @media (min-width: 768px) {
   .settings-dock__pill {
     height: 36px;
@@ -209,7 +168,6 @@
   }
 }
 
-/* Subtle inner highlight on the pill */
 .settings-dock__pill::after {
   content: "";
   position: absolute;
@@ -223,7 +181,7 @@
   pointer-events: none;
 }
 
-/* ── Accessibility: reduce motion ── */
+/* ── Reduce motion ── */
 @media (prefers-reduced-motion: reduce) {
   .settings-dock__item,
   .settings-dock__icon,
