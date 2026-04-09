@@ -7,6 +7,7 @@ import {
   clearCookieToken, signJwt, verifyPassword, generatePAT, hashPassword
 } from "./auth";
 import iosShortcutsRouter from "./ios-shortcuts";
+import bankImportRouter from "./bank-import/route";
 
 let _storage: import("./storage").IStorage | null = null;
 let _pgStorage: import("./storage-pg").PgStorage | null = null;
@@ -80,6 +81,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ── iOS SHORTCUTS ─────────────────────────────────────────────────────────
   app.use("/api/ios", iosShortcutsRouter);
+
+  // ── BANK NOTIFICATION IMPORT ───────────────────────────────────────────────
+  // POST /api/import/bank-notification
+  // Вызывается из iOS Shortcuts при получении push от Т-Банка / Сбера.
+  // Аутентификация: Bearer PAT
+  app.use("/api/import/bank-notification", bankImportRouter);
 
   // ── AUTH ────────────────────────────────────────────────────────────────
 
@@ -504,11 +511,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  /**
-   * DELETE /api/transfers/:id
-   * Atomically deletes both legs of a transfer.
-   * The :id can be the id of either leg — the other is found via linkedTransactionId.
-   */
   app.delete("/api/transfers/:id", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     const userId = getUserId(req);
@@ -517,7 +519,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const allTxs = await pg.getTransactions(userId);
       const tx = allTxs.find(t => t.id === txId);
       if (!tx) return res.status(404).json({ error: "Транзакция не найдена" });
-      // Delete the linked leg first (if it exists), then the requested one
       if (tx.linkedTransactionId) {
         await pg.deleteTransaction(tx.linkedTransactionId, userId).catch(() => {});
       }
@@ -613,11 +614,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  /**
-   * PATCH /api/transactions/:id
-   * Partial update — currently supports changing `date` (drag-and-drop redate).
-   * For transfer transactions both legs are updated atomically.
-   */
   app.patch("/api/transactions/:id", guard, async (req: AuthRequest, res) => {
     if (!pg) return res.status(503).json({ error: "DB required" });
     const userId  = getUserId(req);
@@ -637,7 +633,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       const updated = await pg.updateTransaction(txId, userId, data);
 
-      // For transfers: keep both legs in sync
       if (tx.type === "transfer" && tx.linkedTransactionId && data.date) {
         await pg.updateTransaction(tx.linkedTransactionId, userId, { date: data.date }).catch(() => {});
       }
