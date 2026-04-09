@@ -13,6 +13,10 @@ export function registerDeployRoute(app: Express) {
 
     log("Deploy triggered via webhook", "deploy");
 
+    // Respond immediately — pm2 restart kills this process,
+    // so we must send 200 before the restart command runs.
+    res.json({ message: "Deploy started" });
+
     const cmd = [
       "git -C . pull origin main",
       "npm install --legacy-peer-deps",
@@ -20,13 +24,12 @@ export function registerDeployRoute(app: Express) {
       "pm2 restart moneycheck",
     ].join(" && ");
 
-    exec(cmd, { cwd: process.cwd() }, (err, stdout, stderr) => {
+    exec(cmd, { cwd: process.cwd() }, (err, _stdout, stderr) => {
       if (err) {
-        log(`Deploy failed: ${err.message}`, "deploy");
-        return res.status(500).json({ message: err.message, stderr });
+        log(`Deploy failed: ${err.message}\n${stderr}`, "deploy");
+      } else {
+        log("Deploy successful", "deploy");
       }
-      log("Deploy successful", "deploy");
-      res.json({ message: "Deploy successful", stdout });
     });
   });
 }
