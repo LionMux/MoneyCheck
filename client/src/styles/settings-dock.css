@@ -14,6 +14,12 @@
   - overflow:visible + clip-path so buttons are never clipped.
   - Pill initial transform is translate(0px, -50%) — JS writes the X offset.
   - prefers-reduced-motion: all transitions removed.
+
+  FIXES vs v3:
+  - Active label color changed from hardcoded #151515 to hsl(var(--foreground))
+    so text is visible in both light and dark themes.
+  - Removed ::after gradient overlay on pill that was painting over label text
+    on mobile and causing invisible text on dark theme.
 */
 
 /* ── Container ── */
@@ -67,10 +73,12 @@
   overflow: hidden;
 }
 
+/* FIX: was `color: #151515` — hardcoded near-black invisible on dark theme.
+   Now uses the design token so it adapts to light/dark mode correctly. */
 .settings-dock__item.is-active {
   grid-template-columns: 20px 1fr;
   gap: 7px;
-  color: #151515;
+  color: hsl(var(--foreground));
 }
 
 @media (min-width: 768px) {
@@ -147,7 +155,10 @@
   left: 0;
   top: 50%;
   height: 46px;
-  background: #ffffff;
+  /* Light mode: clean white pill. Dark mode: elevated surface so it
+     contrasts against the muted container background. */
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border) / 0.6);
   border-radius: 9999px;
   transform: translate(0px, -50%);
   transition:
@@ -155,29 +166,25 @@
     width      320ms cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 1;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    0 1px 0 hsl(var(--foreground) / 0.04) inset,
+    0 4px 16px hsl(var(--foreground) / 0.10);
   pointer-events: none;
 }
 
 @media (min-width: 768px) {
   .settings-dock__pill {
     height: 36px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+    box-shadow:
+      0 1px 0 hsl(var(--foreground) / 0.04) inset,
+      0 2px 8px hsl(var(--foreground) / 0.08);
   }
 }
 
-.settings-dock__pill::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(245, 245, 245, 0.92) 100%
-  );
-  pointer-events: none;
-}
+/* FIX: Removed ::after gradient overlay.
+   Previously this painted rgba(255,255,255,0.95) over the entire pill
+   surface including the label text area, making text invisible on
+   dark theme and adding unnecessary z-index stacking complexity. */
 
 /* ── Reduce motion ── */
 @media (prefers-reduced-motion: reduce) {
