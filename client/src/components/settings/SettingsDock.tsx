@@ -15,14 +15,15 @@ interface SettingsDockProps {
 }
 
 /**
- * SettingsDock — animated pill/dock tab switcher.
+ * SettingsDock — animated pill/dock tab switcher (v2).
  *
- * A single absolutely-positioned .settings-dock__pill slides between buttons
- * using JS-measured offsetLeft + offsetWidth. The active label fades/expands
- * in with max-width + opacity + translateX trick (no reflow chaos).
+ * CSS grid 0fr→1fr column transition expands the label column
+ * without max-width caps. The pill is measured TWICE:
+ *   1. Immediately on tab change (fast snap to new position).
+ *   2. After the grid transition ends (pill grows to fit full label).
  *
- * To add a new tab: just add an item to the SETTINGS_TABS array in Settings.tsx.
- * No changes to this component required.
+ * This two-pass approach ensures the pill width always matches
+ * the fully-revealed label, never the collapsed mid-animation state.
  */
 export function SettingsDock({
   tabs,
@@ -40,8 +41,7 @@ export function SettingsDock({
     pill.style.transform = `translate(${targetEl.offsetLeft}px, -50%)`;
   }, []);
 
-  // Move pill whenever activeTab changes
-  useEffect(() => {
+  const syncToActive = useCallback(() => {
     const nav = navRef.current;
     if (!nav) return;
     const active = nav.querySelector<HTMLButtonElement>(
@@ -50,32 +50,38 @@ export function SettingsDock({
     if (active) movePill(active);
   }, [activeTab, movePill]);
 
-  // Move pill on resize
+  // Pass 1: move pill immediately when activeTab changes
   useEffect(() => {
-    const handleResize = () => {
-      const nav = navRef.current;
-      if (!nav) return;
-      const active = nav.querySelector<HTMLButtonElement>(
-        `[data-tab="${activeTab}"]`
-      );
-      if (active) movePill(active);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [activeTab, movePill]);
+    syncToActive();
+  }, [syncToActive]);
 
-  // Set initial pill position after first paint
+  // Pass 2: re-sync after the grid column transition finishes
+  // so pill width matches the fully-expanded label
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      const nav = navRef.current;
-      if (!nav) return;
-      const active = nav.querySelector<HTMLButtonElement>(
-        `[data-tab="${activeTab}"]`
-      );
-      if (active) movePill(active);
-    });
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const handleTransitionEnd = (e: TransitionEvent) => {
+      // Only react to the grid-template-columns transition on the active button
+      if (e.propertyName === "grid-template-columns") {
+        syncToActive();
+      }
+    };
+
+    nav.addEventListener("transitionend", handleTransitionEnd);
+    return () => nav.removeEventListener("transitionend", handleTransitionEnd);
+  }, [syncToActive]);
+
+  // Re-sync on window resize
+  useEffect(() => {
+    window.addEventListener("resize", syncToActive);
+    return () => window.removeEventListener("resize", syncToActive);
+  }, [syncToActive]);
+
+  // Initial position after first paint
+  useEffect(() => {
+    const id = requestAnimationFrame(syncToActive);
     return () => cancelAnimationFrame(id);
-    // Only on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -103,7 +109,6 @@ export function SettingsDock({
           </button>
         );
       })}
-      {/* The sliding pill — sits behind buttons via z-index */}
       <span className="settings-dock__pill" aria-hidden="true" ref={pillRef} />
     </nav>
   );
