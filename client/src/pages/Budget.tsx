@@ -42,7 +42,6 @@ export default function Budget() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/budgets"] }),
   });
 
-  // Calculate spent per category
   const spentMap = transactions
     .filter(t => t.type === "expense")
     .reduce((acc, t) => {
@@ -86,7 +85,6 @@ export default function Budget() {
         </Button>
       </div>
 
-      {/* Alert if over budget */}
       {overCount > 0 && (
         <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3">
           <AlertTriangle size={16} className="text-red-600 flex-shrink-0" />
@@ -96,7 +94,6 @@ export default function Budget() {
         </div>
       )}
 
-      {/* Bar chart overview */}
       {chartData.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
@@ -121,11 +118,14 @@ export default function Budget() {
         </Card>
       )}
 
-      {/* Budget cards */}
+      {/* Budget cards with animated progress bars */}
       <div className="grid grid-cols-1 gap-3">
-        {budgetItems.map(b => (
+        {budgetItems.map((b, index) => (
           <Card key={b.id} data-testid={`budget-item-${b.id}`}
-            className={cn(b.over && "border-red-300 dark:border-red-800")}
+            className={cn(
+              "transition-shadow duration-200 hover:shadow-md",
+              b.over && "border-red-300 dark:border-red-800"
+            )}
           >
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
@@ -136,7 +136,9 @@ export default function Budget() {
                       <span className="text-sm font-semibold">{b.category}</span>
                       {b.over
                         ? <AlertTriangle size={13} className="text-destructive" />
-                        : b.pct >= 80 ? <TrendingDown size={13} className="text-yellow-500" /> : <CheckCircle2 size={13} className="text-income" />
+                        : b.pct >= 80
+                          ? <TrendingDown size={13} className="text-yellow-500" />
+                          : <CheckCircle2 size={13} className="text-income" />
                       }
                     </div>
                     <div className="text-right">
@@ -147,11 +149,38 @@ export default function Budget() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Progress
-                      value={b.pct}
-                      className={cn("flex-1 h-2", b.over ? "[&>div]:bg-destructive" : b.pct >= 80 ? "[&>div]:bg-yellow-500" : "")}
-                    />
-                    <span className={cn("text-xs font-semibold w-9 text-right tabular-nums", b.over ? "text-expense" : "text-muted-foreground")}>
+                    {/*
+                      progress-animated: CSS fill animation from 0 → value on mount.
+                      Stagger delay: each card appears 80ms later than previous.
+                      Color override via inline style on the wrapper.
+                    */}
+                    <div
+                      className="flex-1 progress-animated"
+                      style={{
+                        ['--progress-delay' as string]: `${index * 80}ms`,
+                      }}
+                    >
+                      <Progress
+                        value={b.pct}
+                        className={cn(
+                          "h-2",
+                          b.over
+                            ? "[&>div]:bg-destructive"
+                            : b.pct >= 80
+                              ? "[&>div]:bg-yellow-500"
+                              : ""
+                        )}
+                        style={
+                          !b.over && b.pct < 80
+                            ? { ['--progress-foreground' as string]: b.color }
+                            : undefined
+                        }
+                      />
+                    </div>
+                    <span className={cn(
+                      "text-xs font-semibold w-9 text-right tabular-nums",
+                      b.over ? "text-expense" : "text-muted-foreground"
+                    )}>
                       {b.pct}%
                     </span>
                   </div>
@@ -172,7 +201,6 @@ export default function Budget() {
         ))}
       </div>
 
-      {/* Add Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

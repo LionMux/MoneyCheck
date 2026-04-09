@@ -93,6 +93,7 @@ export default function Goals() {
 
   const totalSaved = goals.reduce((s, g) => s + g.currentAmount, 0);
   const totalTarget = goals.reduce((s, g) => s + g.targetAmount, 0);
+  const totalPct = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -111,18 +112,23 @@ export default function Goals() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">Всего накоплено</span>
-              <span className="text-sm font-semibold tabular-nums text-primary">{fmt(totalSaved)} / {fmt(totalTarget)}</span>
+              <span className="text-sm font-semibold tabular-nums text-primary">
+                {fmt(totalSaved)} / {fmt(totalTarget)}
+              </span>
             </div>
-            <Progress value={totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0} className="h-2" />
+            {/* Animated total progress bar */}
+            <div className="progress-animated" style={{ ['--progress-delay' as string]: '100ms' }}>
+              <Progress value={totalPct} className="h-2" />
+            </div>
             <p className="text-xs text-muted-foreground mt-1.5">
-              {totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0}% от общей суммы целей
+              {totalPct}% от общей суммы целей
             </p>
           </CardContent>
         </Card>
       )}
 
       <div className="grid grid-cols-1 gap-4">
-        {goals.map(goal => {
+        {goals.map((goal, index) => {
           const pct = Math.min(Math.round((goal.currentAmount / goal.targetAmount) * 100), 100);
           const remaining = goal.targetAmount - goal.currentAmount;
           const daysLeft = goal.deadline ? differenceInDays(new Date(goal.deadline), new Date()) : null;
@@ -130,11 +136,20 @@ export default function Goals() {
           const linkedAccount = goal.accountId ? accounts.find((a: any) => a.id === goal.accountId) : null;
 
           return (
-            <Card key={goal.id} data-testid={`goal-card-${goal.id}`} className={cn(done && "border-primary/40")}>
+            <Card
+              key={goal.id}
+              data-testid={`goal-card-${goal.id}`}
+              className={cn(
+                "transition-shadow duration-200 hover:shadow-md",
+                done && "border-primary/40"
+              )}
+            >
               <CardContent className="p-4">
                 <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: goal.color + "22", color: goal.color }}>
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: goal.color + "22", color: goal.color }}
+                  >
                     {ICONS[goal.icon] ?? <Target size={20} />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -149,7 +164,12 @@ export default function Goals() {
                         )}
                         {daysLeft !== null && (
                           <span className={cn("text-xs block", daysLeft < 14 ? "text-expense" : "text-muted-foreground")}>
-                            {daysLeft > 0 ? `${daysLeft} дней осталось` : done ? "Цель достигнута!" : "Срок истёк"}
+                            {daysLeft > 0
+                              ? `${daysLeft} дней осталось`
+                              : done
+                                ? "Цель достигнута!"
+                                : "Срок истёк"
+                            }
                           </span>
                         )}
                       </div>
@@ -162,9 +182,26 @@ export default function Goals() {
                       </button>
                     </div>
 
-                    <div className="mt-3 flex items-center gap-2">
-                      <Progress value={pct} className="flex-1 h-2.5" style={{ ["--progress-foreground" as string]: goal.color }} />
-                      <span className="text-xs font-bold tabular-nums w-9 text-right" style={{ color: goal.color }}>{pct}%</span>
+                    {/* Animated progress bar per goal — stagger by index */}
+                    <div
+                      className="mt-3 flex items-center gap-2"
+                    >
+                      <div
+                        className="flex-1 progress-animated"
+                        style={{ ['--progress-delay' as string]: `${150 + index * 80}ms` }}
+                      >
+                        <Progress
+                          value={pct}
+                          className="h-2.5"
+                          style={{ ['--progress-foreground' as string]: goal.color }}
+                        />
+                      </div>
+                      <span
+                        className="text-xs font-bold tabular-nums w-9 text-right"
+                        style={{ color: goal.color }}
+                      >
+                        {pct}%
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between mt-2">
@@ -208,22 +245,46 @@ export default function Goals() {
           <div className="space-y-3">
             <div>
               <Label>Название цели</Label>
-              <Input data-testid="input-goal-title" placeholder="Например, Отпуск" value={form.title ?? ""} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="mt-1" />
+              <Input
+                data-testid="input-goal-title"
+                placeholder="Например, Отпуск"
+                value={form.title ?? ""}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                className="mt-1"
+              />
             </div>
             <div>
               <Label>Целевая сумма (₽)</Label>
-              <Input data-testid="input-goal-target" type="number" placeholder="100000" value={form.targetAmount ?? ""} onChange={e => setForm(f => ({ ...f, targetAmount: Number(e.target.value) }))} className="mt-1" />
+              <Input
+                data-testid="input-goal-target"
+                type="number"
+                placeholder="100000"
+                value={form.targetAmount ?? ""}
+                onChange={e => setForm(f => ({ ...f, targetAmount: Number(e.target.value) }))}
+                className="mt-1"
+              />
             </div>
             <div>
               <Label>Срок (необязательно)</Label>
-              <Input type="date" value={form.deadline ?? ""} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} className="mt-1" />
+              <Input
+                type="date"
+                value={form.deadline ?? ""}
+                onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
+                className="mt-1"
+              />
             </div>
             <div>
               <Label>Иконка</Label>
               <div className="flex gap-2 mt-2 flex-wrap">
                 {Object.entries(ICONS).map(([key, icon]) => (
-                  <button key={key} onClick={() => setForm(f => ({ ...f, icon: key }))}
-                    className={cn("w-9 h-9 rounded-lg border flex items-center justify-center transition-all", form.icon === key ? "border-primary bg-primary/10" : "border-border hover:border-primary/50")}>
+                  <button
+                    key={key}
+                    onClick={() => setForm(f => ({ ...f, icon: key }))}
+                    className={cn(
+                      "w-9 h-9 rounded-lg border flex items-center justify-center transition-all",
+                      form.icon === key ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
+                    )}
+                  >
                     {icon}
                   </button>
                 ))}
@@ -233,9 +294,12 @@ export default function Goals() {
               <Label>Цвет</Label>
               <div className="flex gap-2 mt-2">
                 {PRESET_COLORS.map(c => (
-                  <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))}
+                  <button
+                    key={c}
+                    onClick={() => setForm(f => ({ ...f, color: c }))}
                     className={cn("w-7 h-7 rounded-full border-2 transition-all", form.color === c ? "border-foreground scale-110" : "border-transparent")}
-                    style={{ background: c }} />
+                    style={{ background: c }}
+                  />
                 ))}
               </div>
             </div>
@@ -268,11 +332,11 @@ export default function Goals() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Без списания со счёта</SelectItem>
-                  {(accounts as any[]).map((acc: any) => {
-                    // Для всех типов счетов показываем реальный баланс
-                    const displayInfo = `${acc.name} · ${fmt(acc.balance ?? 0)}`;
-                    return <SelectItem key={acc.id} value={String(acc.id)}>{displayInfo}</SelectItem>;
-                  })}
+                  {(accounts as any[]).map((acc: any) => (
+                    <SelectItem key={acc.id} value={String(acc.id)}>
+                      {acc.name} · {fmt(acc.balance ?? 0)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -289,7 +353,12 @@ export default function Goals() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setDepositOpen(null); setDepositAmount(""); setDepositAccountId(null); }}>Отмена</Button>
+            <Button
+              variant="outline"
+              onClick={() => { setDepositOpen(null); setDepositAmount(""); setDepositAccountId(null); }}
+            >
+              Отмена
+            </Button>
             <Button
               onClick={() => {
                 if (depositOpen && depositAmount) {
