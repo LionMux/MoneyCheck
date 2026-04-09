@@ -9,6 +9,14 @@
   - Label reveal: grid-template-columns 0fr→1fr (same trick as SettingsDock).
   - Container uses clip-path so pill never bleeds outside the capsule.
   - prefers-reduced-motion: all transitions removed.
+
+  VARIANT A — Accent Pill:
+  - Active pill background = --primary (teal/green accent).
+  - Active tab text + icon = white (#ffffff) for contrast on colored pill.
+  - Inactive tabs = muted-foreground at 50% opacity for clear visual hierarchy.
+  - Removed ::after gloss overlay (caused text occlusion, same bug as SettingsDock).
+  - font-weight 600→500 on label (less heavy on mobile).
+  - gap 4px→6px between tabs for breathing room.
 */
 
 /* ── Outer wrapper (fixed, safe-area aware) ── */
@@ -21,7 +29,6 @@
   padding-inline: 12px;
   padding-top: 8px;
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-  /* Let taps through the transparent padding area */
   pointer-events: none;
 }
 
@@ -30,12 +37,11 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px; /* was 4px — more breathing room between tabs */
   padding: 6px;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 9999px;
-  /* Keep pill inside the capsule visually */
   overflow: visible;
   clip-path: inset(0 round 9999px);
   box-shadow:
@@ -49,7 +55,6 @@
   position: relative;
   z-index: 2;
   flex: 1;
-  /* icon column fixed; label column expands on active */
   display: inline-grid;
   grid-template-columns: 20px 0fr;
   align-items: center;
@@ -59,7 +64,8 @@
   min-width: 48px;
   border: none;
   background: transparent;
-  color: hsl(var(--muted-foreground));
+  /* FIX: inactive tabs at 50% opacity — stronger visual contrast vs active */
+  color: hsl(var(--muted-foreground) / 0.5);
   border-radius: 9999px;
   cursor: pointer;
   text-decoration: none;
@@ -71,10 +77,11 @@
     gap                    280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* FIX: active tab — white text/icon so it reads on the primary-colored pill */
 .bottom-nav__item.is-active {
   grid-template-columns: 20px 1fr;
   gap: 7px;
-  color: hsl(var(--foreground));
+  color: #ffffff;
 }
 
 /* ── Icon wrapper ── */
@@ -92,7 +99,7 @@
   overflow: hidden;
   opacity: 0;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 500; /* was 600 — lighter feel on mobile */
   line-height: 1;
   white-space: nowrap;
   transition: opacity 160ms ease 60ms;
@@ -121,38 +128,32 @@
 }
 
 /* ── Sliding pill ── */
+/* VARIANT A: accent background = --primary so pill is clearly visible
+   in both light and dark themes without relying on surface contrast. */
 .bottom-nav__pill {
   position: absolute;
   left: 0;
   top: 50%;
-  /* JS writes: width, transform: translate(Xpx, -50%) */
   transform: translate(0px, -50%);
-  height: calc(100% - 12px); /* container height - padding*2 */
-  background: hsl(var(--background));
+  height: calc(100% - 12px);
+  /* FIX: was hsl(var(--background)) — near-identical to --card in dark theme,
+     making pill invisible. Now uses --primary for a clear visual anchor. */
+  background: hsl(var(--primary));
   border-radius: 9999px;
   z-index: 1;
   pointer-events: none;
   box-shadow:
-    0 1px 3px hsl(var(--foreground) / 0.08),
-    0 4px 16px hsl(var(--foreground) / 0.06);
+    0 2px 8px hsl(var(--primary) / 0.35),
+    0 4px 20px hsl(var(--primary) / 0.20);
   transition:
     transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
     width     320ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Subtle inner gloss */
-.bottom-nav__pill::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  background: linear-gradient(
-    180deg,
-    hsl(var(--background) / 0.8) 0%,
-    transparent 100%
-  );
-  pointer-events: none;
-}
+/* FIX: Removed ::after gloss gradient.
+   Previously painted hsl(--background / 0.8) over the pill surface,
+   washing out the accent color and partially obscuring active label text.
+   Same root cause as the settings-dock ::after bug fixed in this PR. */
 
 /* ── Press feedback ── */
 .bottom-nav__item:active {
