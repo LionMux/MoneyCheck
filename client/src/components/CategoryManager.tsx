@@ -170,8 +170,9 @@ function CategoryCard({ cat, onEdit, onDelete, overlay = false, dragHandleProps 
   );
 }
 
-function SortableRow({ cat, onEdit, onDelete }: {
+function SortableRow({ cat, index, onEdit, onDelete }: {
   cat: Category;
+  index: number;
   onEdit: (cat: Category) => void;
   onDelete: (id: number) => void;
 }) {
@@ -182,10 +183,13 @@ function SortableRow({ cat, onEdit, onDelete }: {
   return (
     <div
       ref={setNodeRef}
+      className="category-list-item"
       style={{
         transform: CSS.Transform.toString(transform),
         transition: transition ?? 'transform 200ms ease',
         opacity: isDragging ? 0 : 1,
+        // Stagger delay: каждый следующий элемент появляется на 50ms позже
+        ['--item-delay' as string]: `${index * 50}ms`,
       }}
       onDragStart={() => setOpenId(null)}
     >
@@ -215,8 +219,6 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
   const [openSwipeId, setOpenSwipeId] = useState<number | null>(null);
 
   const prevKey = useRef('');
-  // Ключ включает id, sortOrder, name и color —
-  // любое изменение триггерит обновление списка
   const curKey = categories.map(c => `${c.id}:${c.sortOrder}:${c.name}:${c.color}`).join(',');
   if (curKey !== prevKey.current) { prevKey.current = curKey; setItems(categories); }
 
@@ -260,8 +262,8 @@ function CategorySection({ title, type, categories, onReorder, onEdit, onDelete,
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <SortableContext items={items.map(c => c.id)} strategy={verticalListSortingStrategy}>
               <div className="flex flex-col gap-2">
-                {items.map(cat => (
-                  <SortableRow key={cat.id} cat={cat} onEdit={onEdit} onDelete={onDelete} />
+                {items.map((cat, index) => (
+                  <SortableRow key={cat.id} cat={cat} index={index} onEdit={onEdit} onDelete={onDelete} />
                 ))}
               </div>
             </SortableContext>
@@ -307,7 +309,6 @@ export default function CategoryManager() {
       (await apiRequest('PATCH', `/api/categories/${id}`, data)).json(),
     onSuccess: (updated: Category) => {
       toast({ title: 'Категория обновлена' });
-      // Оптимистично обновляем кеш сразу, без ждания сети
       qc.setQueryData<Category[]>(['/api/categories'], (old = []) =>
         old.map(c => c.id === updated.id ? updated : c)
       );
