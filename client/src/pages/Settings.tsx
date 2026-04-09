@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Key, Plus, Trash2, Copy, Check, Info, ShieldCheck, Terminal, LayoutGrid,
   Smartphone, ArrowDownToLine, TrendingUp, TrendingDown, Zap, ChevronRight,
-  Eye, Wallet,
+  Eye, Wallet, Type,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import {
 import CategoryManager from "@/components/CategoryManager";
 import { cn } from "@/lib/utils";
 import { SettingsDock, type SettingsDockTab } from "@/components/settings/SettingsDock";
+import { FontPicker } from "@/components/settings/FontPicker";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tab definitions — to add a new settings tab, just append an item here.
@@ -31,6 +32,7 @@ import { SettingsDock, type SettingsDockTab } from "@/components/settings/Settin
 const SETTINGS_TABS: SettingsDockTab[] = [
   { id: "categories",  label: "Категории",    icon: <LayoutGrid size={18} /> },
   { id: "display",     label: "Отображение",  icon: <Eye       size={18} /> },
+  { id: "fonts",       label: "Шрифты",       icon: <Type      size={18} /> },
   { id: "tokens",      label: "API-токены",   icon: <Key       size={18} /> },
   { id: "shortcuts",   label: "Виджеты",      icon: <Smartphone size={18} /> },
 ];
@@ -322,6 +324,11 @@ export default function SettingsPage() {
       {/* ── TAB: DISPLAY ── */}
       {activeTab === "display" && (
         <DisplayPreferences />
+      )}
+
+      {/* ── TAB: FONTS ── */}
+      {activeTab === "fonts" && (
+        <FontPicker />
       )}
 
       {/* ── TAB: API TOKENS ── */}

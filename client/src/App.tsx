@@ -5,6 +5,7 @@ import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { DisplayPreferencesProvider } from "@/contexts/DisplayPreferencesContext";
+import { FontPreferencesProvider } from "@/contexts/FontPreferencesContext";
 import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
@@ -71,10 +72,14 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <Router hook={useHashLocation}>
         <AuthProvider>
-          <DisplayPreferencesProvider>
-            <AppRouter />
-            <Toaster />
-          </DisplayPreferencesProvider>
+          {/* FontPreferencesProvider must wrap DisplayPreferencesProvider
+              so --font-body is set before any display preference consumers render */}
+          <FontPreferencesProvider>
+            <DisplayPreferencesProvider>
+              <AppRouter />
+              <Toaster />
+            </DisplayPreferencesProvider>
+          </FontPreferencesProvider>
         </AuthProvider>
       </Router>
     </QueryClientProvider>
