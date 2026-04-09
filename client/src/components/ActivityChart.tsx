@@ -77,8 +77,8 @@ export default function ActivityChart({ transactions }: { transactions: Transact
       return {
         label,
         fullDate: format(d, "d MMM", { locale: ru }),
-                  income: dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
-                  expense: dayTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0),
+        income:  dayTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0),
+        expense: dayTxs.filter(t => (t.type === "expense" || t.type === "creditPurchase")).reduce((s, t) => s + Math.abs(t.amount), 0),
       };
     });
   }, [transactions, range]);
