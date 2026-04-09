@@ -83,11 +83,11 @@ export default function Dashboard() {
   const monthTxs = transactions.filter(t => t.date.startsWith(currentDisplayMonth));
 
   // creditPayment = перевод на кредитку, не доход и не расход
-    const income = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-    const expense = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const income  = monthTxs.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense = monthTxs.filter(t => (t.type === "expense" || t.type === "creditPurchase")).reduce((s, t) => s + Math.abs(t.amount), 0);
 
-    const incomeCount = monthTxs.filter(t => t.type === "income").length;
-    const expenseCount = monthTxs.filter(t => t.type === "expense" || t.type === "creditPurchase").length;
+  const incomeCount  = monthTxs.filter(t => t.type === "income").length;
+  const expenseCount = monthTxs.filter(t => (t.type === "expense" || t.type === "creditPurchase")).length;
 
   const monthLabel    = format(new Date(currentDisplayMonth + "-01"), "LLLL", { locale: ru });
   const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
