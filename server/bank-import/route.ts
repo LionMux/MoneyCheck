@@ -54,9 +54,15 @@ router.post("/", patOrJwtMiddleware, async (req: AuthRequest, res) => {
     return res.status(503).json({ error: "Database not configured. PostgreSQL required." });
   }
 
+  // Debug: log what actually arrived
+  console.log("[bank-import] incoming body:", JSON.stringify(req.body));
+  console.log("[bank-import] content-type:", req.headers["content-type"]);
+
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid body" });
+    const issues = parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+    console.log("[bank-import] validation failed:", issues);
+    return res.status(400).json({ error: issues });
   }
 
   const { message, bank, cardLast4 } = parsed.data;
