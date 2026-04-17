@@ -16,18 +16,16 @@ export type BankEvent = {
   rawText: string;
 };
 
-const TBANK_PURCHASE =
-  /(?:Покупка|Оплата|Операция)[:\s]+?([\d,. ]+)\s*(руб|₽|RUB|USD|EUR)?[\s\S]*?(?:в |В |у )?(.*?)(?:\n|$|\s{2,})/i;
 const TBANK_AMOUNT = /([\d\s,.]+)\s*(руб|₽|RUB|USD|EUR)/i;
 const TBANK_CARD = /\*{1,4}(\d{4})/;
-const TBANK_MERCHANT_PATTERNS = [
-  /(?:в магазине|в |у )"?([A-Za-zА-Яа-яёЁ0-9\s\-.,&]+)"?/i,
-  /([A-Z][A-Z0-9\s\-*]+?)(?:\s{2,}|\n|$)/,
-];
 
 const SBER_AMOUNT = /([\d\s,]+\.?\d*)\s*(руб|₽|RUB)/i;
 const SBER_CARD = /карт[аое]\s*(?:\*+)?(\d{4})/i;
-const SBER_MERCHANT = /(?:в |В |торговая точка[:\ ]+|Перевод[:\ ]+|Зачисление[:\ ]+)"?([\w\s\-.,&А-Яа-яёЁ]+?)"?(?:[.\n]|$)/i;
+
+const STOP_WORDS = new Set([
+  "Покупка", "Оплата", "Операция", "Зачисление", "Перевод",
+  "Снятие", "Банкомат", "Списано", "Карта", "от", "в", "на", "по", "за", "с", "для",
+]);
 
 function parseAmount(raw: string): number {
   return parseFloat(raw.replace(/\s/g, "").replace(",", ".")) || 0;
@@ -39,15 +37,41 @@ function detectCurrency(text: string): string {
   return "RUB";
 }
 
+function extractMerchantAfterAmount(
+  text: string,
+  amountMatch: RegExpMatchArray | null,
+  prefixPattern: RegExp,
+): string {
+  if (!amountMatch) return "";
+  const afterAmount = text.slice(amountMatch.index! + amountMatch[0].length);
+
+  // 1. Ищем по шаблону с префиксом ("в магазине", "торговая точка:" и т.п.)
+  const m1 = afterAmount.match(prefixPattern);
+  if (m1?.[1]) {
+    const val = m1[1].trim();
+    if (val.length > 1) return val;
+  }
+
+  // 2. Ищем первое подходящее слово (не служебное)
+  const wordRe = /([A-ZА-ЯЁ][A-Za-zА-Яа-яёЁ]*)/gi;
+  let m2: RegExpExecArray | null;
+  while ((m2 = wordRe.exec(afterAmount)) !== null) {
+    const val = m2[1].trim();
+    if (val.length > 1 && !STOP_WORDS.has(val)) {
+      return val;
+    }
+  }
+
+  return "";
+}
+
 export function parseTbankMessage(text: string): BankEvent {
   const cardMatch = text.match(TBANK_CARD);
   const amountMatch = text.match(TBANK_AMOUNT);
 
-  let merchantRaw = "";
-  for (const p of TBANK_MERCHANT_PATTERNS) {
-    const m = text.match(p);
-    if (m?.[1]) { merchantRaw = m[1].trim(); break; }
-  }
+  const prefixPattern =
+    /(?:в\s+магазине\s+|в\s+у\s+|в\s+)["«']?([A-Za-zА-Яа-яёЁ0-9\s\-&]+?)["»']?(?=\.|,|\s+Карта|\s+карта|$)/i;
+  const merchantRaw = extractMerchantAfterAmount(text, amountMatch, prefixPattern);
 
   let operationType: BankEvent["operationType"] = "unknown";
   if (/покупка|оплата|списание/i.test(text)) operationType = "card_purchase";
@@ -70,7 +94,10 @@ export function parseTbankMessage(text: string): BankEvent {
 export function parseSberMessage(text: string): BankEvent {
   const cardMatch = text.match(SBER_CARD);
   const amountMatch = text.match(SBER_AMOUNT);
-  const merchantMatch = text.match(SBER_MERCHANT);
+
+  const prefixPattern =
+    /(?:торговая\s+точка\s*[:\s]+|в\s+магазине\s+|в\s+у\s+|в\s+)["«']?([A-Za-zА-Яа-яёЁ0-9\s\-&]+?)["»']?(?=\.|,|\s+карта|\s+Карта|$)/i;
+  const merchantRaw = extractMerchantAfterAmount(text, amountMatch, prefixPattern);
 
   let operationType: BankEvent["operationType"] = "unknown";
   if (/покупка|оплата|списано/i.test(text)) operationType = "card_purchase";
@@ -83,7 +110,7 @@ export function parseSberMessage(text: string): BankEvent {
     operationType,
     amount: amountMatch ? parseAmount(amountMatch[1]) : 0,
     currency: detectCurrency(text),
-    merchantRaw: merchantMatch?.[1]?.trim() || text.slice(0, 60),
+    merchantRaw: merchantRaw || text.slice(0, 60),
     cardLast4: cardMatch?.[1] ?? null,
     timestamp: new Date().toISOString(),
     rawText: text,
