@@ -55,10 +55,35 @@ router.post("/", patOrJwtMiddleware, async (req: AuthRequest, res) => {
   }
 
   // Debug: log what actually arrived
-  console.log("[bank-import] incoming body:", JSON.stringify(req.body));
+  console.log("[bank-import] === REQUEST DEBUG ===");
+  console.log("[bank-import] method:", req.method);
+  console.log("[bank-import] path:", req.path);
   console.log("[bank-import] content-type:", req.headers["content-type"]);
+  console.log("[bank-import] authorization present:", !!req.headers["authorization"]);
+  console.log("[bank-import] body type:", typeof req.body);
+  console.log("[bank-import] body:", JSON.stringify(req.body));
+  console.log("[bank-import] rawBody:", (req as any).rawBody ? String((req as any).rawBody).slice(0, 500) : "(none)");
+  console.log("[bank-import] query:", JSON.stringify(req.query));
+  console.log("[bank-import] === END DEBUG ===");
 
-  const parsed = bodySchema.safeParse(req.body);
+  // Try body first, then query params, then rawBody as JSON
+  let bodyToParse = req.body;
+  if (!bodyToParse || Object.keys(bodyToParse).length === 0) {
+    if (req.query && Object.keys(req.query).length > 0) {
+      console.log("[bank-import] falling back to query params");
+      bodyToParse = req.query;
+    } else if ((req as any).rawBody) {
+      try {
+        const raw = String((req as any).rawBody);
+        console.log("[bank-import] falling back to rawBody parsing");
+        bodyToParse = JSON.parse(raw);
+      } catch (e) {
+        console.log("[bank-import] rawBody is not valid JSON");
+      }
+    }
+  }
+
+  const parsed = bodySchema.safeParse(bodyToParse);
   if (!parsed.success) {
     const issues = parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
     console.log("[bank-import] validation failed:", issues);
