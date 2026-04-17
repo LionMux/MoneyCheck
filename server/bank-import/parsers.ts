@@ -19,12 +19,13 @@ export type BankEvent = {
 const TBANK_AMOUNT = /([\d\s,.]+)\s*(руб|₽|RUB|USD|EUR)/i;
 const TBANK_CARD = /\*{1,4}(\d{4})/;
 
-const SBER_AMOUNT = /([\d\s,]+\.?\d*)\s*(руб|₽|RUB)/i;
-const SBER_CARD = /карт[аое]\s*(?:\*+)?(\d{4})/i;
+const SBER_AMOUNT = /([\d\s,.]+\.?\d*)\s*(руб|₽|р|RUB)/i;
+const SBER_CARD = /(?:карт[аое]\s*(?:\*+)?|VISA|MASTERCARD|МИР)(\d{4})/i;
 
 const STOP_WORDS = new Set([
   "Покупка", "Оплата", "Операция", "Зачисление", "Перевод",
   "Снятие", "Банкомат", "Списано", "Карта", "от", "в", "на", "по", "за", "с", "для",
+  "Баланс", "Счёт", "Счет",
 ]);
 
 function parseAmount(raw: string): number {
@@ -95,15 +96,28 @@ export function parseSberMessage(text: string): BankEvent {
   const cardMatch = text.match(SBER_CARD);
   const amountMatch = text.match(SBER_AMOUNT);
 
-  const prefixPattern =
-    /(?:торговая\s+точка\s*[:\s]+|в\s+магазине\s+|в\s+у\s+|в\s+)["«']?([A-Za-zА-Яа-яёЁ0-9\s\-&]+?)["»']?(?=\.|,|\s+карта|\s+Карта|$)/i;
-  const merchantRaw = extractMerchantAfterAmount(text, amountMatch, prefixPattern);
+  // Для Сбера: мерчант идёт после суммы и перед "Баланс:" или концом строки
+  let merchantRaw = "";
+  if (amountMatch) {
+    const afterAmount = text.slice(amountMatch.index! + amountMatch[0].length);
+    // Ищем мерчант до слова "Баланс" или конца строки
+    const balanceIdx = afterAmount.search(/Баланс[:\s]/i);
+    const merchantPart = balanceIdx >= 0 ? afterAmount.slice(0, balanceIdx) : afterAmount;
+    // Берём первое слово/токен с буквами (включая * и цифры)
+    const m = merchantPart.match(/([A-Za-zА-Яа-яёЁ][A-Za-zА-Яа-яёЁ0-9*\-_.]+)/);
+    if (m) merchantRaw = m[1];
+  }
+  if (!merchantRaw) {
+    const prefixPattern =
+      /(?:торговая\s+точка\s*[:\s]+|в\s+магазине\s+|в\s+у\s+|в\s+)["«']?([A-Za-zА-Яа-яёЁ0-9\s\-&*]+?)["»']?(?=\.|,|\s+карта|\s+Карта|$)/i;
+    merchantRaw = extractMerchantAfterAmount(text, amountMatch, prefixPattern);
+  }
 
   let operationType: BankEvent["operationType"] = "unknown";
   if (/покупка|оплата|списано/i.test(text)) operationType = "card_purchase";
   else if (/снятие|банкомат/i.test(text)) operationType = "atm_withdrawal";
   else if (/перевод/i.test(text)) operationType = "transfer_out";
-  else if (/зачислено|поступление|пополнение/i.test(text)) operationType = "income";
+  else if (/зачислено|поступление|пополнение|зачисление\s+зарплаты|зачисление\s+премии/i.test(text)) operationType = "income";
 
   return {
     bank: "sber",
